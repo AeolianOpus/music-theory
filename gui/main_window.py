@@ -1,14 +1,10 @@
-"""
-Main application window — shell with tab layout.
-Full widget implementation will follow in the GUI build phase.
-"""
-
 from PySide6.QtWidgets import (
     QMainWindow, QTabWidget, QWidget, QVBoxLayout, QLabel, QStatusBar,
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from core.audio_engine import AudioEngine
+from gui.chord_builder import ChordBuilder
 
 
 class MainWindow(QMainWindow):
@@ -35,14 +31,12 @@ class MainWindow(QMainWindow):
 
         # Tab widget
         self.tabs = QTabWidget()
-        self.tabs.setTabPosition(QTabWidget.North)
+        self.tabs.setTabPosition(QTabWidget.TabPosition.North)
         self.tabs.setMovable(False)
 
         # ── Tabs (placeholders — each will be a full widget) ──
-        self.tabs.addTab(self._placeholder("Scale Finder",
-            "Build chord progressions and find matching scales.\n"
-            "Select key, choose chords, get ranked scale suggestions."),
-            "🎵 Scale Finder")
+        self.chord_builder = ChordBuilder()
+        self.tabs.addTab(self.chord_builder, "🎵 Scale Finder")
 
         self.tabs.addTab(self._placeholder("Guitar Fretboard",
             "Interactive fretboard showing scales, chords, and notes.\n"
@@ -85,20 +79,20 @@ class MainWindow(QMainWindow):
         """Create a placeholder tab widget."""
         w = QWidget()
         lay = QVBoxLayout(w)
-        lay.setAlignment(Qt.AlignCenter)
+        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         lbl_title = QLabel(title)
-        lbl_title.setFont(QFont("Segoe UI", 24, QFont.Bold))
-        lbl_title.setAlignment(Qt.AlignCenter)
+        lbl_title.setFont(QFont("Segoe UI", 24, QFont.Weight.Bold))
+        lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         lbl_desc = QLabel(description)
         lbl_desc.setFont(QFont("Segoe UI", 12))
-        lbl_desc.setAlignment(Qt.AlignCenter)
+        lbl_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_desc.setStyleSheet("color: #888;")
 
         lbl_status = QLabel("[ Under Construction ]")
         lbl_status.setFont(QFont("Segoe UI", 10))
-        lbl_status.setAlignment(Qt.AlignCenter)
+        lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_status.setStyleSheet("color: #555; margin-top: 20px;")
 
         lay.addWidget(lbl_title)
