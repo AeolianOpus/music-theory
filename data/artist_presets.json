@@ -1,0 +1,270 @@
+{
+  "artists": [
+    {
+      "name": "Yngwie J. Malmsteen",
+      "style": "Neoclassical Metal / Shred",
+      "signature_scales": ["Harmonic Minor", "Phrygian Dominant", "Diminished (HW)", "Aeolian (Natural Minor)"],
+      "common_progressions": [
+        {
+          "name": "Neoclassical i-iv-V",
+          "chords": ["Am", "Dm", "E7", "Am"],
+          "key": "Am",
+          "suggested_scale": "A Harmonic Minor"
+        },
+        {
+          "name": "Baroque Shred",
+          "chords": ["Am", "Bdim", "E7", "Am"],
+          "key": "Am",
+          "suggested_scale": "A Harmonic Minor"
+        },
+        {
+          "name": "Far Beyond The Sun",
+          "chords": ["Am", "G", "F", "E7"],
+          "key": "Am",
+          "suggested_scale": "A Harmonic Minor"
+        },
+        {
+          "name": "Diminished Run",
+          "chords": ["E7", "Am", "Dm", "Bdim"],
+          "key": "Am",
+          "suggested_scale": "A Harmonic Minor"
+        },
+        {
+          "name": "Black Star Intro",
+          "chords": ["Em", "Am", "B7", "Em"],
+          "key": "Em",
+          "suggested_scale": "E Harmonic Minor"
+        }
+      ]
+    },
+    {
+      "name": "Gary Moore",
+      "style": "Blues Rock / Hard Rock",
+      "signature_scales": ["Minor Pentatonic", "Blues", "Aeolian (Natural Minor)", "Dorian", "Harmonic Minor"],
+      "common_progressions": [
+        {
+          "name": "Still Got The Blues",
+          "chords": ["Am", "Dm", "G", "C", "F", "Dm", "E7", "Am"],
+          "key": "Am",
+          "suggested_scale": "A Harmonic Minor"
+        },
+        {
+          "name": "Parisienne Walkways",
+          "chords": ["Am", "C", "G", "Em"],
+          "key": "Am",
+          "suggested_scale": "A Aeolian (Natural Minor)"
+        },
+        {
+          "name": "Blues for Greeny",
+          "chords": ["Am7", "Dm7", "Am7", "E7"],
+          "key": "Am",
+          "suggested_scale": "A Blues"
+        },
+        {
+          "name": "The Loner",
+          "chords": ["Am", "F", "C", "G", "Am"],
+          "key": "Am",
+          "suggested_scale": "A Aeolian (Natural Minor)"
+        }
+      ]
+    },
+    {
+      "name": "Al Di Meola",
+      "style": "Jazz Fusion / Mediterranean (70s-80s)",
+      "signature_scales": ["Phrygian", "Phrygian Dominant", "Harmonic Minor", "Altered (Super Locrian)", "Whole Tone"],
+      "common_progressions": [
+        {
+          "name": "Mediterranean Sundance",
+          "chords": ["Am", "E7", "Am", "Dm", "Am", "E7", "Am"],
+          "key": "Am",
+          "suggested_scale": "A Phrygian Dominant"
+        },
+        {
+          "name": "Elegant Gypsy Suite",
+          "chords": ["Dm", "A7", "Dm", "Gm", "A7", "Dm"],
+          "key": "Dm",
+          "suggested_scale": "D Harmonic Minor"
+        },
+        {
+          "name": "Race With Devil",
+          "chords": ["Em", "Am", "B7", "Em"],
+          "key": "Em",
+          "suggested_scale": "E Phrygian"
+        },
+        {
+          "name": "Egyptian Danza",
+          "chords": ["Am", "Bb", "Am", "E7"],
+          "key": "Am",
+          "suggested_scale": "A Phrygian Dominant"
+        },
+        {
+          "name": "Splendido Hotel Fusion",
+          "chords": ["Dm7", "G7", "Cmaj7", "Fmaj7", "Bm7b5", "E7", "Am"],
+          "key": "Am",
+          "suggested_scale": "A Harmonic Minor"
+        }
+      ]
+    },
+    {
+      "name": "Pink Floyd",
+      "style": "Progressive / Psychedelic Rock",
+      "signature_scales": ["Minor Pentatonic", "Dorian", "Mixolydian", "Aeolian (Natural Minor)", "Blues"],
+      "common_progressions": [
+        {
+          "name": "Comfortably Numb",
+          "chords": ["Bm", "A", "G", "Em", "Bm"],
+          "key": "Bm",
+          "suggested_scale": "B Aeolian (Natural Minor)"
+        },
+        {
+          "name": "Shine On You Crazy Diamond",
+          "chords": ["Gm", "Bb", "F", "Gm"],
+          "key": "Gm",
+          "suggested_scale": "G Aeolian (Natural Minor)"
+        },
+        {
+          "name": "Time",
+          "chords": ["F#m", "A", "E", "F#m"],
+          "key": "F#m",
+          "suggested_scale": "F# Dorian"
+        },
+        {
+          "name": "Breathe",
+          "chords": ["Em", "A", "Em", "A"],
+          "key": "Em",
+          "suggested_scale": "E Dorian"
+        },
+        {
+          "name": "Money",
+          "chords": ["Bm", "Bm", "F#m", "Em"],
+          "key": "Bm",
+          "suggested_scale": "B Minor Pentatonic"
+        },
+        {
+          "name": "Wish You Were Here",
+          "chords": ["Em", "G", "A7sus4", "Em", "G"],
+          "key": "Em",
+          "suggested_scale": "E Aeolian (Natural Minor)"
+        }
+      ]
+    },
+    {
+      "name": "Johann Sebastian Bach",
+      "style": "Baroque Classical",
+      "signature_scales": ["Ionian (Major)", "Aeolian (Natural Minor)", "Harmonic Minor", "Melodic Minor", "Dorian", "Mixolydian"],
+      "common_progressions": [
+        {
+          "name": "Toccata in D minor",
+          "chords": ["Dm", "A7", "Dm", "Gm", "Dm", "A7", "Dm"],
+          "key": "Dm",
+          "suggested_scale": "D Harmonic Minor"
+        },
+        {
+          "name": "Canon-style (I-V-vi-iii-IV)",
+          "chords": ["C", "G", "Am", "Em", "F", "C", "F", "G"],
+          "key": "C",
+          "suggested_scale": "C Ionian (Major)"
+        },
+        {
+          "name": "Baroque Minor (i-iv-V7-i)",
+          "chords": ["Am", "Dm", "E7", "Am"],
+          "key": "Am",
+          "suggested_scale": "A Harmonic Minor"
+        },
+        {
+          "name": "Circle of Fifths",
+          "chords": ["Am", "Dm", "G", "C", "F", "Bdim", "E7", "Am"],
+          "key": "Am",
+          "suggested_scale": "A Harmonic Minor"
+        },
+        {
+          "name": "Air on the G String (simplified)",
+          "chords": ["C", "Am", "Dm", "G7", "C"],
+          "key": "C",
+          "suggested_scale": "C Ionian (Major)"
+        },
+        {
+          "name": "Prelude in C Major (BWV 846)",
+          "chords": ["C", "Dm7", "G7", "C", "Am", "D7", "G"],
+          "key": "C",
+          "suggested_scale": "C Ionian (Major)"
+        }
+      ]
+    },
+    {
+      "name": "Jimi Hendrix",
+      "style": "Blues Rock / Psychedelic",
+      "signature_scales": ["Minor Pentatonic", "Blues", "Mixolydian", "Dorian"],
+      "common_progressions": [
+        {
+          "name": "Purple Haze",
+          "chords": ["E7#9", "G", "A"],
+          "key": "E",
+          "suggested_scale": "E Minor Pentatonic"
+        },
+        {
+          "name": "Voodoo Child",
+          "chords": ["E7", "E7", "E7", "E7"],
+          "key": "E",
+          "suggested_scale": "E Blues"
+        },
+        {
+          "name": "Little Wing",
+          "chords": ["Em", "G", "Am", "Em", "Bm", "Am", "C", "G", "F"],
+          "key": "Em",
+          "suggested_scale": "E Aeolian (Natural Minor)"
+        },
+        {
+          "name": "The Wind Cries Mary",
+          "chords": ["C", "Bb", "F", "G", "Bb", "F"],
+          "key": "F",
+          "suggested_scale": "F Mixolydian"
+        }
+      ]
+    },
+    {
+      "name": "Joe Satriani",
+      "style": "Instrumental Rock / Fusion",
+      "signature_scales": ["Lydian", "Mixolydian", "Dorian", "Harmonic Minor", "Whole Tone"],
+      "common_progressions": [
+        {
+          "name": "Always With Me Always With You",
+          "chords": ["B", "G#m", "E", "F#"],
+          "key": "B",
+          "suggested_scale": "B Ionian (Major)"
+        },
+        {
+          "name": "Surfing With The Alien",
+          "chords": ["Em", "C", "D", "Em"],
+          "key": "Em",
+          "suggested_scale": "E Dorian"
+        },
+        {
+          "name": "Flying In A Blue Dream",
+          "chords": ["C", "G", "Am", "F"],
+          "key": "C",
+          "suggested_scale": "C Lydian"
+        }
+      ]
+    },
+    {
+      "name": "Stevie Ray Vaughan",
+      "style": "Texas Blues",
+      "signature_scales": ["Minor Pentatonic", "Blues", "Mixolydian", "Dorian"],
+      "common_progressions": [
+        {
+          "name": "Pride And Joy",
+          "chords": ["E7", "A7", "E7", "B7", "A7", "E7"],
+          "key": "E",
+          "suggested_scale": "E Blues"
+        },
+        {
+          "name": "Texas Flood",
+          "chords": ["G7", "C7", "G7", "D7", "C7", "G7"],
+          "key": "G",
+          "suggested_scale": "G Blues"
+        }
+      ]
+    }
+  ]
+}
