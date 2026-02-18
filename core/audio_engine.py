@@ -4,6 +4,9 @@ Handles SoundFont loading, note/chord triggering, and instrument selection.
 """
 from __future__ import annotations
 import os
+import sys
+if sys.platform == "win32":
+    os.add_dll_directory(r"C:\ProgramData\scoop\apps\fluidsynth\2.5.2\bin")
 import time
 import threading
 from typing import Optional, Any, TYPE_CHECKING

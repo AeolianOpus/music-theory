@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal
 
+from core.audio_engine import AudioEngine, PIANO_CHANNEL
 from core.music_theory import Chord, ChordProgression, SHARP_NAMES, CHORD_FORMULAS, QUALITY_DISPLAY
 from core.scale_matcher import suggest_scales
 
@@ -13,9 +14,10 @@ class ChordBuilder(QWidget):
     progression_changed = Signal(object)   # emits ChordProgression
     scale_selected = Signal(object)        # emits ScaleMatch
     
-    def __init__(self, parent=None):
+    def __init__(self, audio_engine: AudioEngine | None = None, parent=None):
         super().__init__(parent)
         self.progression = ChordProgression()
+        self.audio = audio_engine
         self._setup_ui()
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -47,6 +49,21 @@ class ChordBuilder(QWidget):
         self.clear_btn.clicked.connect(self._clear_progression)
         input_row.addWidget(self.clear_btn)
 
+        # Play button
+        self.play_btn = QPushButton("▶ Play")
+        self.play_btn.clicked.connect(self._play_chord)
+        input_row.addWidget(self.play_btn)
+
+        # Arpeggio button
+        self.arp_btn = QPushButton("🎵 Arpeggio")
+        self.arp_btn.clicked.connect(self._play_arpeggio)
+        input_row.addWidget(self.arp_btn)
+
+        # Stop button
+        self.stop_btn = QPushButton("■ Stop")
+        self.stop_btn.clicked.connect(self._stop)
+        input_row.addWidget(self.stop_btn)
+        
         layout.addLayout(input_row)
 
         # ── Current progression display ──
@@ -68,6 +85,35 @@ class ChordBuilder(QWidget):
         results_layout.addWidget(self.results_list)
 
         layout.addWidget(results_group)
+
+    def _chord_midi_notes(self) -> list[int]:
+        root = self.root_combo.currentIndex()  # 0-11
+        quality = self.quality_combo.currentData()
+        from core.music_theory import CHORD_FORMULAS
+        intervals = CHORD_FORMULAS[quality]
+        base = 60 + root  # middle C octave
+        notes = []
+        for i, interval in enumerate(intervals):
+            note = base + interval
+            # keep ascending
+            if i > 0 and note <= notes[-1]:
+                note += 12
+            notes.append(note)
+        return notes
+    
+    def _play_chord(self) -> None:
+        if self.audio and self.audio.is_ready:
+            notes = self._chord_midi_notes()
+            self.audio.play_chord_async(PIANO_CHANNEL, notes, duration=1.5)
+            
+    def _play_arpeggio(self) -> None:
+        if self.audio and self.audio.is_ready:
+            notes = self._chord_midi_notes()
+            self.audio.play_arpeggio_async(PIANO_CHANNEL, notes)
+            
+    def _stop(self) -> None:
+        if self.audio and self.audio.is_ready:
+            self.audio.all_notes_off()        
 
     def _add_chord(self):
         root = self.root_combo.currentText()
