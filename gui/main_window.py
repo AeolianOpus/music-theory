@@ -35,7 +35,7 @@ class MainWindow(QMainWindow):
         self.tabs.setMovable(False)
 
         # ── Tabs (placeholders — each will be a full widget) ──
-        self.chord_builder = ChordBuilder(self.audio)
+        self.chord_builder = ChordBuilder()
         self.tabs.addTab(self.chord_builder, "🎵 Scale Finder")
 
         self.tabs.addTab(self._placeholder("Guitar Fretboard",
@@ -103,42 +103,63 @@ class MainWindow(QMainWindow):
     def _apply_theme(self):
         """Apply dark theme QSS."""
         self.setStyleSheet("""
-            QMainWindow {
-                background-color: #1e1e2e;
-            }
-            QTabWidget::pane {
-                border: 1px solid #313244;
-                background-color: #1e1e2e;
-            }
-            QTabBar::tab {
-                background-color: #313244;
-                color: #cdd6f4;
-                padding: 10px 20px;
-                margin-right: 2px;
-                border-top-left-radius: 6px;
-                border-top-right-radius: 6px;
-                font-size: 12px;
-            }
-            QTabBar::tab:selected {
-                background-color: #45475a;
-                color: #f5c2e7;
-            }
-            QTabBar::tab:hover {
-                background-color: #585b70;
-            }
-            QWidget {
-                background-color: #1e1e2e;
-                color: #cdd6f4;
-            }
-            QLabel {
-                color: #cdd6f4;
-            }
-            QStatusBar {
-                background-color: #181825;
-                color: #a6adc8;
-                font-size: 11px;
-            }
-        """)
+        QMainWindow {
+            background-color: #1e1e2e;
+        }
+        QTabWidget::pane {
+            border: 1px solid #313244;
+            background-color: #1e1e2e;
+        }
+        QTabBar::tab {
+            background-color: #313244;
+            color: #cdd6f4;
+            padding: 10px 20px;
+            margin-right: 2px;
+            border-top-left-radius: 6px;
+            border-top-right-radius: 6px;
+            font-size: 12px;
+        }
+        QTabBar::tab:selected {
+            background-color: #45475a;
+            color: #f5c2e7;
+        }
+        QTabBar::tab:hover {
+            background-color: #585b70;
+        }
+        QWidget {
+            background-color: #1e1e2e;
+            color: #cdd6f4;
+        }
+        QLabel {
+            color: #cdd6f4;
+        }
+        QStatusBar {
+            background-color: #181825;
+            color: #a6adc8;
+            font-size: 11px;
+        }
+        QPushButton {
+            background-color: #313244;
+            color: #cdd6f4;
+            border: 1px solid #45475a;
+            border-radius: 6px;
+            padding: 6px 14px;
+            font-size: 12px;
+        }
+        QPushButton:hover {
+            background-color: #45475a;
+            border-color: #89b4fa;
+        }
+        QPushButton:pressed {
+            background-color: #585b70;
+        }
+        QPushButton:checked {
+            background-color: #89b4fa;
+            color: #1e1e2e;
+            border-color: #89b4fa;
+            font-weight: bold;
+        }
+    """)
 
     def closeEvent(self, event):
         """Clean up on window close."""
