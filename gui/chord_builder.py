@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QPushButton,
-    QLabel, QListWidget, QGroupBox,
+    QLabel, QListWidget, QGroupBox, QListWidgetItem, QButtonGroup,
 )
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Qt
 
 from core.audio_engine import AudioEngine, PIANO_CHANNEL
 from core.music_theory import Chord, ChordProgression, SHARP_NAMES, CHORD_FORMULAS, QUALITY_DISPLAY
@@ -26,10 +26,19 @@ class ChordBuilder(QWidget):
         input_row = QHBoxLayout()
 
         # Root note dropdown
-        self.root_combo = QComboBox()
-        self.root_combo.addItems(SHARP_NAMES)  # C, C#, D, ... B
+        from PySide6.QtWidgets import QButtonGroup
+
         input_row.addWidget(QLabel("Root:"))
-        input_row.addWidget(self.root_combo)
+        self.root_group = QButtonGroup(self)
+        self.root_buttons: list[QPushButton] = []
+        for i, name in enumerate(SHARP_NAMES):
+            btn = QPushButton(name)
+            btn.setCheckable(True)
+            btn.setFixedWidth(48)
+            self.root_group.addButton(btn, i)
+            self.root_buttons.append(btn)
+            input_row.addWidget(btn)
+        self.root_buttons[0].setChecked(True)  # default to C
 
         # Quality dropdown
         self.quality_combo = QComboBox()
@@ -87,15 +96,14 @@ class ChordBuilder(QWidget):
         layout.addWidget(results_group)
 
     def _chord_midi_notes(self) -> list[int]:
-        root = self.root_combo.currentIndex()  # 0-11
+        root = self.root_group.checkedId()
         quality = self.quality_combo.currentData()
         from core.music_theory import CHORD_FORMULAS
         intervals = CHORD_FORMULAS[quality]
-        base = 60 + root  # middle C octave
+        base = 60 + root
         notes = []
         for i, interval in enumerate(intervals):
             note = base + interval
-            # keep ascending
             if i > 0 and note <= notes[-1]:
                 note += 12
             notes.append(note)
@@ -115,8 +123,8 @@ class ChordBuilder(QWidget):
         if self.audio and self.audio.is_ready:
             self.audio.all_notes_off()        
 
-    def _add_chord(self):
-        root = self.root_combo.currentText()
+    def _add_chord(self) -> None:
+        root = SHARP_NAMES[self.root_group.checkedId()]
         quality = self.quality_combo.currentData()
         symbol = root + QUALITY_DISPLAY.get(quality, quality or "maj")
 
@@ -146,25 +154,22 @@ class ChordBuilder(QWidget):
         results = suggest_scales(self.progression, top_n=3, alternatives=5)
 
         # Store matches for click handling
-        self._matches = []
-
         self.results_list.addItem("── Top Matches ──")
         for m in results["top"]:
-            self._matches.append(m)
-            miss = f"  (missing: {', '.join(m.missing_note_names())})" if m.missing_notes else "  ✓"
-            self.results_list.addItem(
-                f"  {m.display_name}   score: {m.score:.0%}{miss}"
-            )
+                miss = f"  (missing: {', '.join(m.missing_note_names())})" if m.missing_notes else "  ✓"
+                item = QListWidgetItem(f"  {m.display_name}   score: {m.score:.0%}{miss}")
+                item.setData(Qt.ItemDataRole.UserRole, m)
+                self.results_list.addItem(item)
 
         self.results_list.addItem("")
         self.results_list.addItem("── Alternatives ──")
         for m in results["alternatives"]:
-            self._matches.append(m)
             miss = f"  (missing: {', '.join(m.missing_note_names())})" if m.missing_notes else "  ✓"
-            self.results_list.addItem(
-                f"  {m.display_name}   score: {m.score:.0%}{miss}"
-            )
+            item = QListWidgetItem(f"  {m.display_name}   score: {m.score:.0%}{miss}")
+            item.setData(Qt.ItemDataRole.UserRole, m)
+            self.results_list.addItem(item)
 
-    def _on_scale_clicked(self, item):
-        # TODO: emit selected scale so fretboard/piano can highlight it
-        pass
+    def _on_scale_clicked(self, item) -> None:
+        match = item.data(Qt.ItemDataRole.UserRole)
+        if match is not None:
+            self.scale_selected.emit(match)
