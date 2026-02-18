@@ -37,9 +37,6 @@ def main():
     app.setApplicationName("Music Theory Scale Finder")
     app.setOrganizationName("MusicTheory")
 
-    # High DPI support
-    app.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
-
     # Default font
     font = QFont("Segoe UI", 10)
     app.setFont(font)

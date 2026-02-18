@@ -35,7 +35,7 @@ class MainWindow(QMainWindow):
         self.tabs.setMovable(False)
 
         # ── Tabs (placeholders — each will be a full widget) ──
-        self.chord_builder = ChordBuilder()
+        self.chord_builder = ChordBuilder(self.audio)
         self.tabs.addTab(self.chord_builder, "🎵 Scale Finder")
 
         self.tabs.addTab(self._placeholder("Guitar Fretboard",
