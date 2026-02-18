@@ -2,14 +2,15 @@
 Audio engine using FluidSynth for real-time instrument playback.
 Handles SoundFont loading, note/chord triggering, and instrument selection.
 """
-
 from __future__ import annotations
 import os
 import time
 import threading
-from typing import Optional
+from typing import Optional, Any, TYPE_CHECKING
 
-# FluidSynth may not be installed yet — allow import to succeed
+if TYPE_CHECKING:
+    import fluidsynth
+
 try:
     import fluidsynth
     HAS_FLUIDSYNTH = True
@@ -18,7 +19,7 @@ except ImportError:
 
 
 # General MIDI program numbers for common instruments
-GM_PROGRAMS = {
+GM_PROGRAMS: dict[str, int] = {
     "acoustic_grand_piano": 0,
     "bright_piano": 1,
     "electric_grand": 2,
@@ -66,12 +67,12 @@ class AudioEngine:
     FluidSynth-based audio engine for real-time instrument playback.
     """
 
-    def __init__(self, soundfont_path: Optional[str] = None):
-        self._synth: Optional[object] = None
+    def __init__(self, soundfont_path: Optional[str] = None) -> None:
+        self._synth: Any = None
         self._sfid: Optional[int] = None
-        self._soundfont_path = soundfont_path
-        self._initialized = False
-        self._lock = threading.Lock()
+        self._soundfont_path: Optional[str] = soundfont_path
+        self._initialized: bool = False
+        self._lock: threading.Lock = threading.Lock()
 
     def initialize(self, soundfont_path: Optional[str] = None) -> bool:
         """
@@ -82,15 +83,17 @@ class AudioEngine:
             print("Warning: pyfluidsynth not installed. Audio disabled.")
             return False
 
-        sf_path = soundfont_path or self._soundfont_path
+        sf_path: Optional[str] = soundfont_path or self._soundfont_path
         if not sf_path or not os.path.exists(sf_path):
             print(f"Warning: SoundFont not found at '{sf_path}'. Audio disabled.")
             return False
 
+        import fluidsynth
+
         try:
             with self._lock:
-                self._synth = fluidsynth.Synth(gain=0.8, samplerate=44100.0)
-                self._synth.start(driver="dsound")  # Windows DirectSound
+                self._synth = fluidsynth.Synth(gain=0.8, samplerate=44100)
+                self._synth.start()  # Use default audio driver
                 self._sfid = self._synth.sfload(sf_path)
                 if self._sfid == -1:
                     print("Failed to load SoundFont.")
@@ -198,7 +201,6 @@ class AudioEngine:
             return
         with self._lock:
             if channel is not None:
-                # CC 123 = All Notes Off
                 self._synth.cc(channel, 123, 0)
             else:
                 for ch in range(16):
