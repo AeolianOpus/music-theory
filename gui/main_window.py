@@ -38,10 +38,11 @@ class MainWindow(QMainWindow):
         self.chord_builder = ChordBuilder(self.audio)
         self.tabs.addTab(self.chord_builder, "🎵 Scale Finder")
 
-        self.tabs.addTab(self._placeholder("Guitar Fretboard",
-            "Interactive fretboard showing scales, chords, and notes.\n"
-            "Supports custom tunings and click-to-play."),
-            "🎸 Guitar")
+        from gui.fretboard import FretboardWidget
+
+        # Add fretboard
+        self.fretboard = FretboardWidget()
+        self.tabs.addTab(self.fretboard, "Guitar")
 
         self.tabs.addTab(self._placeholder("Piano Keyboard",
             "Interactive piano keyboard for visualizing scales and chords.\n"
