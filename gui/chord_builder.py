@@ -19,6 +19,15 @@ QUALITY_CATEGORIES = {
     "Sus & Other": ["sus2", "sus4", "6", "min6", "5"],
 }
 
+# Rhythm patterns for progression playback
+# Each pattern is a list of relative durations (will be scaled by chord_duration)
+RHYTHM_PATTERNS = {
+    "Straight": [1.0],  # All chords same duration
+    "Waltz (3/4)": [1.5, 0.75, 0.75],  # Long-short-short
+    "Shuffle": [1.33, 0.67],  # Long-short swing feel
+    "Blues (12-bar feel)": [2.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],  # Typical blues timing
+}
+
 class ChordBuilder(QWidget):
     # Signal other widgets can listen to (fretboard, piano, etc.)
     progression_changed = Signal(object)   # emits ChordProgression
@@ -28,6 +37,7 @@ class ChordBuilder(QWidget):
         super().__init__(parent)
         self.progression = ChordProgression()
         self.audio = audio_engine
+        self.is_playing_progression = False  # Track progression playback state
         self._setup_ui()
         
     def _setup_ui(self):
@@ -129,6 +139,43 @@ class ChordBuilder(QWidget):
         self.find_btn = QPushButton("Find Matching Scales")
         self.find_btn.clicked.connect(self._find_scales)
         layout.addWidget(self.find_btn)
+        
+        # ── Progression playback controls ──
+        progression_controls = QHBoxLayout()
+        
+        self.play_progression_btn = QPushButton("▶ Play Progression")
+        self.play_progression_btn.clicked.connect(self._play_progression)
+        self.play_progression_btn.setFixedHeight(40)
+        progression_controls.addWidget(self.play_progression_btn)
+        
+        self.stop_progression_btn = QPushButton("■ Stop Progression")
+        self.stop_progression_btn.clicked.connect(self._stop_progression)
+        self.stop_progression_btn.setFixedHeight(40)
+        self.stop_progression_btn.setEnabled(False)  # Disabled until progression plays
+        progression_controls.addWidget(self.stop_progression_btn)
+        
+        progression_controls.addWidget(QLabel("Chord Duration:"))
+        from PySide6.QtWidgets import QSpinBox
+        self.chord_duration = QSpinBox()
+        self.chord_duration.setRange(500, 5000)  # 0.5 to 5 seconds
+        self.chord_duration.setValue(1500)  # Default 1.5 seconds
+        self.chord_duration.setSuffix(" ms")
+        progression_controls.addWidget(self.chord_duration)
+        
+        from PySide6.QtWidgets import QCheckBox
+        self.loop_progression = QCheckBox("Loop")
+        progression_controls.addWidget(self.loop_progression)
+        
+        # Add rhythm pattern selector
+        progression_controls.addWidget(QLabel("Pattern:"))
+        from PySide6.QtWidgets import QComboBox
+        self.rhythm_pattern = QComboBox()
+        for pattern_name in RHYTHM_PATTERNS.keys():
+            self.rhythm_pattern.addItem(pattern_name)
+        progression_controls.addWidget(self.rhythm_pattern)
+        
+        progression_controls.addStretch()
+        layout.addLayout(progression_controls)
 
         # ── Results ──
         results_group = QGroupBox("Scale Suggestions")
@@ -169,7 +216,10 @@ class ChordBuilder(QWidget):
             
     def _stop(self) -> None:
         if self.audio and self.audio.is_ready:
-            self.audio.all_notes_off()        
+            self.audio.all_notes_off()
+        
+        # Stop progression playback
+        self.is_playing_progression = False     
 
     def _add_chord(self) -> None:
         root = SHARP_NAMES[self.root_group.checkedId()]
@@ -192,10 +242,25 @@ class ChordBuilder(QWidget):
         self.progression_changed.emit(self.progression)
 
     def _update_display(self):
-        if self.progression.chords:
-            text = self.progression.display()
-        else:
-            text = "(empty)"
+        """Update progression display without highlighting."""
+        self._update_progression_display()
+    
+    def _update_progression_display(self, current_index: int | None = None):
+        """Update progression display, optionally highlighting the current chord."""
+        if not self.progression.chords:
+            self.progression_label.setText("Progression: (empty)")
+            return
+        
+        # Build display with optional highlighting
+        chord_displays = []
+        for i, chord in enumerate(self.progression.chords):
+            display = chord.display_name
+            if current_index is not None and i == current_index:
+                # Highlight current chord
+                display = f"► {display} ◄"
+            chord_displays.append(display)
+        
+        text = " - ".join(chord_displays)
         self.progression_label.setText(f"Progression: {text}")
 
     def _find_scales(self):
@@ -252,4 +317,84 @@ class ChordBuilder(QWidget):
         
         # Select first quality by default
         if self.quality_buttons:
-            self.quality_buttons[0].setChecked(True)      
+            self.quality_buttons[0].setChecked(True)   
+    
+    def _play_progression(self) -> None:
+        """Play through the entire chord progression."""
+        if not self.progression.chords:
+            return
+        
+        if not self.audio or not self.audio.is_ready:
+            return
+        
+        # Set playback flag
+        self.is_playing_progression = True
+        self.play_progression_btn.setEnabled(False)
+        self.stop_progression_btn.setEnabled(True)
+        
+        import threading
+        
+        def play_sequence():
+            if not self.audio:  # Extra safety check
+                return
+                
+            audio_engine = self.audio  # Local variable for type checker
+            duration_ms = self.chord_duration.value()
+            duration_sec = duration_ms / 1000.0
+            
+            # Get rhythm pattern
+            pattern_name = self.rhythm_pattern.currentText()
+            pattern = RHYTHM_PATTERNS[pattern_name]
+            
+            while self.is_playing_progression:
+                for i, chord in enumerate(self.progression.chords):
+                    # Check if we should stop
+                    if not self.is_playing_progression:
+                        break
+                    
+                    # Calculate duration based on rhythm pattern
+                    pattern_index = i % len(pattern)
+                    chord_duration = duration_sec * pattern[pattern_index]
+                    
+                    # Update UI to highlight current chord
+                    self._update_progression_display(current_index=i)
+                    
+                    # Build MIDI notes for this chord
+                    root = chord.root
+                    intervals = chord.intervals
+                    base = 60 + root
+                    notes = []
+                    for idx, interval in enumerate(intervals):
+                        note = base + interval
+                        if idx > 0 and note <= notes[-1]:
+                            note += 12
+                        notes.append(note)
+                    
+                    # Play the chord
+                    audio_engine.play_chord_async(PIANO_CHANNEL, notes, duration=chord_duration)
+                    
+                    # Wait for chord duration
+                    import time
+                    time.sleep(chord_duration)
+                
+                # Check if we should loop
+                if not self.loop_progression.isChecked():
+                    self.is_playing_progression = False
+                    break
+            
+            # Reset display when done
+            self._update_progression_display()
+            self.stop_progression_btn.setEnabled(False)
+            self.play_progression_btn.setEnabled(True)
+        
+        # Run in background thread so UI doesn't freeze
+        thread = threading.Thread(target=play_sequence, daemon=True)
+        thread.start()
+    
+    def _stop_progression(self) -> None:
+        """Stop progression playback."""
+        self.is_playing_progression = False
+        self.stop_progression_btn.setEnabled(False)
+        self.play_progression_btn.setEnabled(True)
+        if self.audio and self.audio.is_ready:
+            self.audio.all_notes_off()    
