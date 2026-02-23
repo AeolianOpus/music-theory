@@ -6,7 +6,21 @@ from __future__ import annotations
 import os
 import sys
 if sys.platform == "win32":
-    os.add_dll_directory(r"C:\ProgramData\scoop\apps\fluidsynth\2.5.2\bin")
+    # Try to find FluidSynth in common Scoop locations
+    fluidsynth_paths = [
+        r"C:\ProgramData\scoop\apps\fluidsynth\2.5.2\bin",  # PC (global install)
+        r"C:\Users\Constantine\scoop\apps\fluidsynth\2.5.2\bin",  # Laptop (user install)
+    ]
+    
+    fluidsynth_found = False
+    for path in fluidsynth_paths:
+        if os.path.exists(path):
+            os.add_dll_directory(path)
+            fluidsynth_found = True
+            break
+    
+    if not fluidsynth_found:
+        print("Warning: FluidSynth path not found in expected locations")
 import time
 import threading
 from typing import Optional, Any, TYPE_CHECKING
