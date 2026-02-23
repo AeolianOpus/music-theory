@@ -108,9 +108,35 @@ class AudioEngine:
         import fluidsynth
 
         try:
-            with self._lock:
-                self._synth = fluidsynth.Synth(gain=0.8, samplerate=44100)
-                self._synth.start()  # Use default audio driver
+            with self._lock:               
+                
+                # Create synth
+                self._synth = fluidsynth.Synth(
+                    gain=0.3,
+                    samplerate=48000
+                )
+                
+                # Use DirectSound on Windows for lower latency (if available) 
+                self._synth.setting('audio.driver', 'dsound')
+                
+                # Disable MIDI driver
+                self._synth.setting('midi.driver', 'winmidi')
+                
+                # Increase buffer
+                try:
+                    self._synth.setting('audio.period-size', 2048)
+                    self._synth.setting('audio.periods', 16)
+                except:
+                    pass
+                
+                time.sleep(0.5)
+                from fluidsynth import new_fluid_audio_driver
+                if new_fluid_audio_driver:
+                    self._audio_driver = new_fluid_audio_driver(self._synth.settings, self._synth.synth)
+                else:
+                    print("Error: new_fluid_audio_driver not available")
+                    return False
+                
                 self._sfid = self._synth.sfload(sf_path)
                 if self._sfid == -1:
                     print("Failed to load SoundFont.")
