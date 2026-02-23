@@ -1,6 +1,9 @@
 """
 Music Theory Scale Finder — Main Application Entry Point
 """
+# Bootstrap: patch venv and check environment before importing modules
+import bootstrap
+bootstrap.run_bootstrap()
 
 import sys
 import os

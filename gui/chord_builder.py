@@ -1,3 +1,5 @@
+from unicodedata import category
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QPushButton,
     QLabel, QListWidget, QGroupBox, QListWidgetItem, QButtonGroup,
@@ -5,9 +7,17 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt
 
 from core.audio_engine import AudioEngine, PIANO_CHANNEL
-from core.music_theory import Chord, ChordProgression, SHARP_NAMES, CHORD_FORMULAS, QUALITY_DISPLAY
+from core.music_theory import QUALITY_FULL_NAMES, Chord, ChordProgression, SHARP_NAMES, CHORD_FORMULAS, QUALITY_DISPLAY, QUALITY_FULL_NAMES
 from core.scale_matcher import suggest_scales
 
+# Chord quality categories for button layout
+QUALITY_CATEGORIES = {
+    "Triads": ["maj", "min", "dim", "aug"],
+    "7ths": ["maj7", "min7", "7", "dim7", "m7b5", "minmaj7", "aug7", "augmaj7"],
+    "Extended": ["9", "maj9", "min9", "11", "min11", "13", "min13"],
+    "Altered": ["7b5", "7#5", "7b9", "7#9", "add9", "madd9"],
+    "Sus & Other": ["sus2", "sus4", "6", "min6", "5"],
+}
 
 class ChordBuilder(QWidget):
     # Signal other widgets can listen to (fretboard, piano, etc.)
@@ -19,13 +29,14 @@ class ChordBuilder(QWidget):
         self.progression = ChordProgression()
         self.audio = audio_engine
         self._setup_ui()
+        
     def _setup_ui(self):
         layout = QVBoxLayout(self)
 
         # ── Chord input row ──
         input_row = QHBoxLayout()
 
-        # Root note dropdown
+        # Root note buttons
         from PySide6.QtWidgets import QButtonGroup
 
         input_row.addWidget(QLabel("Root:"))
@@ -40,40 +51,74 @@ class ChordBuilder(QWidget):
             input_row.addWidget(btn)
         self.root_buttons[0].setChecked(True)  # default to C
 
-        # Quality dropdown
-        self.quality_combo = QComboBox()
-        for key, display in QUALITY_DISPLAY.items():
-            label = display if display else "maj"
-            self.quality_combo.addItem(label, key)  # shows "m", stores "min"
-        input_row.addWidget(QLabel("Quality:"))
-        input_row.addWidget(self.quality_combo)
+        input_row.addStretch()  # Add space between keys and controls
 
-        # Add button
-        self.add_btn = QPushButton("Add Chord")
+        # Add chord controls to this row
+        self.add_btn = QPushButton("➕ Add Chord")
         self.add_btn.clicked.connect(self._add_chord)
+        self.add_btn.setFixedHeight(50)
+        self.add_btn.setMinimumWidth(120)
         input_row.addWidget(self.add_btn)
 
-        # Clear button
-        self.clear_btn = QPushButton("Clear")
+        self.clear_btn = QPushButton("🗑️ Clear All")
         self.clear_btn.clicked.connect(self._clear_progression)
+        self.clear_btn.setFixedHeight(50)
+        self.clear_btn.setMinimumWidth(120)
         input_row.addWidget(self.clear_btn)
+
+        input_row.addStretch()  # Separate from playback controls
 
         # Play button
         self.play_btn = QPushButton("▶ Play")
         self.play_btn.clicked.connect(self._play_chord)
+        self.play_btn.setFixedHeight(45)
+        self.play_btn.setMinimumWidth(90)
         input_row.addWidget(self.play_btn)
 
         # Arpeggio button
         self.arp_btn = QPushButton("🎵 Arpeggio")
         self.arp_btn.clicked.connect(self._play_arpeggio)
+        self.arp_btn.setFixedHeight(45)
+        self.arp_btn.setMinimumWidth(100)
         input_row.addWidget(self.arp_btn)
 
         # Stop button
         self.stop_btn = QPushButton("■ Stop")
         self.stop_btn.clicked.connect(self._stop)
+        self.stop_btn.setFixedHeight(45)
+        self.stop_btn.setMinimumWidth(90)
         input_row.addWidget(self.stop_btn)
+
+        layout.addLayout(input_row)  # Add the root buttons row
         
-        layout.addLayout(input_row)
+        # Quality category tabs (separate row)
+        category_row = QHBoxLayout()
+        category_row.addWidget(QLabel("Quality:"))
+        self.category_group = QButtonGroup(self)
+        self.category_buttons: dict[str, QPushButton] = {}
+        for i, category in enumerate(QUALITY_CATEGORIES.keys()):
+            btn = QPushButton(category)
+            btn.setCheckable(True)
+            btn.setFixedWidth(100)
+            self.category_group.addButton(btn, i)
+            self.category_buttons[category] = btn
+            category_row.addWidget(btn)
+        
+        category_row.addStretch()
+        layout.addLayout(category_row)
+        
+        # Quality buttons (will change based on category selection)
+        self.quality_row = QHBoxLayout()
+        self.quality_group = QButtonGroup(self)
+        self.quality_buttons: list[QPushButton] = []
+        
+        layout.addLayout(self.quality_row)
+        
+        # Set default category and update quality buttons
+        first_category = list(QUALITY_CATEGORIES.keys())[0]
+        self.category_buttons[first_category].setChecked(True)
+        self.category_group.buttonClicked.connect(self._update_quality_buttons)
+        self._update_quality_buttons()
 
         # ── Current progression display ──
         self.progression_label = QLabel("Progression: (empty)")
@@ -97,7 +142,10 @@ class ChordBuilder(QWidget):
 
     def _chord_midi_notes(self) -> list[int]:
         root = self.root_group.checkedId()
-        quality = self.quality_combo.currentData()
+        category_id = self.category_group.checkedId()
+        category_name = list(QUALITY_CATEGORIES.keys())[category_id]
+        quality_id = self.quality_group.checkedId()
+        quality = QUALITY_CATEGORIES[category_name][quality_id]
         from core.music_theory import CHORD_FORMULAS
         intervals = CHORD_FORMULAS[quality]
         base = 60 + root
@@ -125,7 +173,11 @@ class ChordBuilder(QWidget):
 
     def _add_chord(self) -> None:
         root = SHARP_NAMES[self.root_group.checkedId()]
-        quality = self.quality_combo.currentData()
+        # Get selected category and quality
+        category_id = self.category_group.checkedId()
+        category_name = list(QUALITY_CATEGORIES.keys())[category_id]
+        quality_id = self.quality_group.checkedId()
+        quality = QUALITY_CATEGORIES[category_name][quality_id]
         symbol = root + QUALITY_DISPLAY.get(quality, quality or "maj")
 
         chord = Chord.parse(symbol)
@@ -173,3 +225,31 @@ class ChordBuilder(QWidget):
         match = item.data(Qt.ItemDataRole.UserRole)
         if match is not None:
             self.scale_selected.emit(match)
+            
+    def _update_quality_buttons(self) -> None:
+        """Update quality buttons based on selected category."""
+        # Clear existing quality buttons
+        for btn in self.quality_buttons:
+            self.quality_group.removeButton(btn)
+            self.quality_row.removeWidget(btn)
+            btn.deleteLater()
+        self.quality_buttons.clear()
+        
+        # Get selected category
+        category_id = self.category_group.checkedId()
+        category_name = list(QUALITY_CATEGORIES.keys())[category_id]
+        qualities = QUALITY_CATEGORIES[category_name]
+        
+        # Create new quality buttons
+        for i, quality_key in enumerate(qualities):
+            full_name = QUALITY_FULL_NAMES.get(quality_key, quality_key)
+            btn = QPushButton(full_name)
+            btn.setCheckable(True)
+            btn.setFixedHeight(40)
+            self.quality_group.addButton(btn, i)
+            self.quality_buttons.append(btn)
+            self.quality_row.addWidget(btn)
+        
+        # Select first quality by default
+        if self.quality_buttons:
+            self.quality_buttons[0].setChecked(True)      

@@ -104,6 +104,44 @@ QUALITY_DISPLAY: dict[str, str] = {
     "add9": "add9", "madd9": "m(add9)", "6": "6", "min6": "m6", "5": "5",
 }
 
+# Full display names for UI buttons/dropdowns
+QUALITY_FULL_NAMES: dict[str, str] = {
+    # Triads
+    "maj": "Major",
+    "min": "Minor",
+    "dim": "Diminished",
+    "aug": "Augmented",
+    "sus2": "Suspended 2nd",
+    "sus4": "Suspended 4th",
+    # Sevenths
+    "maj7": "Major 7th",
+    "min7": "Minor 7th",
+    "7": "Dominant 7th",
+    "dim7": "Diminished 7th",
+    "m7b5": "Half-Diminished 7th",
+    "minmaj7": "Minor Major 7th",
+    "aug7": "Augmented 7th",
+    "augmaj7": "Augmented Major 7th",
+    # Extended
+    "9": "Dominant 9th",
+    "maj9": "Major 9th",
+    "min9": "Minor 9th",
+    "11": "Dominant 11th",
+    "min11": "Minor 11th",
+    "13": "Dominant 13th",
+    "min13": "Minor 13th",
+    # Altered
+    "7b5": "Dominant 7♭5",
+    "7#5": "Dominant 7♯5",
+    "7b9": "Dominant 7♭9",
+    "7#9": "Dominant 7♯9",
+    "add9": "Add 9",
+    "madd9": "Minor Add 9",
+    "6": "Major 6th",
+    "min6": "Minor 6th",
+    # Power chord
+    "5": "Power Chord",
+}
 
 @dataclass(frozen=True)
 class Chord:
