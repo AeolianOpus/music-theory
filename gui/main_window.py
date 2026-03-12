@@ -44,6 +44,9 @@ class MainWindow(QMainWindow):
         self.fretboard = FretboardWidget()
         self.tabs.addTab(self.fretboard, "Guitar")
 
+        # Connect scale selection to fretboard
+        self.chord_builder.scale_selected.connect(self._update_fretboard_from_scale)
+
         self.tabs.addTab(self._placeholder("Piano Keyboard",
             "Interactive piano keyboard for visualizing scales and chords.\n"
             "Click keys to play notes and chords."),
@@ -101,6 +104,19 @@ class MainWindow(QMainWindow):
         lay.addWidget(lbl_status)
         return w
 
+    def _update_fretboard_from_scale(self, scale_match):
+        """Update fretboard visualization when a scale is selected."""
+        # Extract scale notes from the match
+        scale_notes = scale_match.scale.notes
+
+        # TODO: Calculate fret positions for each note across all strings
+        # For now, just log it
+        print(f"Scale selected: {scale_match.scale.name} - Notes: {scale_notes}")
+
+        # You'll need to implement the logic to map notes to (string, fret) positions
+        # based on the current tuning, then call:
+        # self.fretboard.highlight_notes(positions, colors)
+    
     def _apply_theme(self):
         """Apply dark theme QSS."""
         self.setStyleSheet("""

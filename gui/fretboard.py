@@ -8,8 +8,6 @@ from PySide6.QtCore import Qt, QPointF
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QImage, QPixmap, QLinearGradient
 from pathlib import Path
 from core.tuning import GUITAR_TUNINGS, Tuning
-from noise import pnoise2
-import random
 
 
 class FretboardWidget(QWidget):
@@ -59,130 +57,141 @@ class FretboardWidget(QWidget):
         
         layout.addStretch(1)
     
-    def _sample_malmsteen_palette(self) -> list[QColor]:
-        """Extract color palette from the Malmsteen fretboard image."""
-        image_path = Path(__file__).parent / "fretboard_malmsteen.png"
         
-        if not image_path.exists():
-            # Fallback: Realistic maple colors
-            return [
-                QColor(245, 222, 179),  # Light maple (wheat)
-                QColor(222, 184, 135),  # Medium maple (burlywood)
-                QColor(205, 133, 63),   # Dark grain (peru)
-                QColor(160, 82, 45),    # Darker grain (sienna)
-                QColor(210, 180, 140),  # Tan variation
-            ]
-        
-        # Sample colors from the actual image
-        image = QImage(str(image_path))
-        colors = []
-        
-        # Sample from multiple points
-        sample_points = [
-            (image.width() // 4, image.height() // 2),
-            (image.width() // 2, image.height() // 3),
-            (image.width() // 2, 2 * image.height() // 3),
-            (3 * image.width() // 4, image.height() // 2),
-        ]
-        
-        for x, y in sample_points:
-            if 0 <= x < image.width() and 0 <= y < image.height():
-                colors.append(image.pixelColor(x, y))
-        
-        if colors:
-            return colors
-        else:
-            # Fallback to default palette
-            return [
-                QColor(245, 222, 179),
-                QColor(222, 184, 135),
-                QColor(205, 133, 63),
-                QColor(160, 82, 45),
-                QColor(210, 180, 140),
-            ]
-    
-    def _generate_wood_texture(self, width: int, height: int) -> QImage:
-        """Generate realistic wood grain using Perlin noise."""
-        # Get maple color palette
-        palette = self._sample_malmsteen_palette()
-        
-        # Catppuccin peach tint for theming
-        theme_tint = QColor(250, 179, 135)
-        
-        # Random seed for variation
-        seed = random.randint(1, 10000)
-        
-        # Create texture
-        texture = QImage(width, height, QImage.Format.Format_RGB32)
-        
-        for y in range(height):
-            for x in range(width):
-                # Generate wood grain using pnoise2 (emphasize horizontal flow)
-                noise_val = (
-                    0.5 * pnoise2(x / width * 2 + seed, y / height * 0.5, octaves=3) +
-                    0.3 * pnoise2(x / width * 4 + seed, y / height * 1.0, octaves=6) +
-                    0.2 * pnoise2(x / width * 8 + seed, y / height * 2.0, octaves=10)
-                )
-                
-                # Map noise to color palette
-                noise_normalized = (noise_val + 1) / 2  # -1..1 → 0..1
-                color_index = int(noise_normalized * (len(palette) - 1))
-                color_index = max(0, min(len(palette) - 1, color_index))
-                
-                base_color = palette[color_index]
-                
-                # Apply subtle theme tint (10% blend)
-                r = int(0.9 * base_color.red() + 0.1 * theme_tint.red())
-                g = int(0.9 * base_color.green() + 0.1 * theme_tint.green())
-                b = int(0.9 * base_color.blue() + 0.1 * theme_tint.blue())
-                
-                # Slight darkening for theme integration
-                r = int(r * 0.85)
-                g = int(g * 0.85)
-                b = int(b * 0.85)
-                
-                texture.setPixelColor(x, y, QColor(r, g, b))
-        
-        return texture
-    
     def paintEvent(self, event):
-        """Draw the procedural fretboard."""
+        """Draw the guitar with note overlays."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
+
         # Catppuccin base background
         base_bg = QColor(30, 30, 46)
         painter.fillRect(self.rect(), base_bg)
         
-        # Calculate fretboard dimensions (centered, 70% height)
-        padding = 60
-        fb_height = int(self.height() * 0.7)
-        fb_width = self.width() - padding * 2
-        fb_x = padding
-        fb_y = (self.height() - fb_height) // 2
-        
-        # Store for note overlays later
-        self.fretboard_x = fb_x
-        self.fretboard_y = fb_y
-        self.fretboard_width = fb_width
-        self.fretboard_height = fb_height
-        
-        # Generate wood texture once
-        if not self._texture_generated:
-            self.wood_texture = self._generate_wood_texture(fb_width, fb_height)
-            self._texture_generated = True
-        
-        # Draw wood texture
-        if self.wood_texture:
-            painter.drawImage(fb_x, fb_y, self.wood_texture)
-        
-        # Draw fretboard elements
-        self._draw_strings(painter, fb_x, fb_y, fb_width, fb_height)
-        self._draw_frets(painter, fb_x, fb_y, fb_width, fb_height)
-        self._draw_fret_markers(painter, fb_x, fb_y, fb_width, fb_height)
-        
-        # Draw note overlays if any
+        # Load guitar image
+        image_path = Path(__file__).parent / "guitar_malmsteen.png"
+        if not image_path.exists():
+            painter.setPen(QColor(255, 255, 255))
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Guitar image not found")
+            return
+
+        # Load image
+        guitar_image = QImage(str(image_path))
+
+        # Crop horizontally only - keep FULL original height
+        crop_left = int(guitar_image.width() * 0.30)
+        crop_width = int(guitar_image.width() * 0.70)
+
+        # Use full height - no vertical cropping at all
+        guitar_image = guitar_image.copy(crop_left, 0, crop_width, guitar_image.height())
+
+        # Calculate scaling to fit widget while maintaining aspect ratio
+        widget_ratio = self.width() / self.height()
+        image_ratio = guitar_image.width() / guitar_image.height()
+
+        if widget_ratio > image_ratio:
+            # Widget is wider - fit to height
+            scaled_height = self.height()
+            scaled_width = int(scaled_height * image_ratio)
+        else:
+            # Widget is taller - fit to width
+            scaled_width = self.width()
+            scaled_height = int(scaled_width / image_ratio)
+
+        # Center the image
+        x_offset = (self.width() - scaled_width) // 2
+        y_offset = (self.height() - scaled_height) // 2
+
+        # Draw scaled guitar image
+        scaled_image = guitar_image.scaled(
+            scaled_width, 
+            scaled_height, 
+            Qt.AspectRatioMode.KeepAspectRatio, 
+            Qt.TransformationMode.SmoothTransformation
+        )
+        painter.drawImage(x_offset, y_offset, scaled_image)
+
+        # Store dimensions for note overlay calculations
+        self.guitar_x = x_offset
+        self.guitar_y = y_offset
+        self.guitar_width = scaled_width
+        self.guitar_height = scaled_height
+
+        # Calculate fret and string positions
+        # Fretboard starts at ~35% from left, ends at ~95% from left
+        fretboard_start_ratio = 0.35
+        fretboard_end_ratio = 0.95
+
+        # Strings are between ~40% and ~60% of height (center band)
+        string_top_ratio = 0.40
+        string_bottom_ratio = 0.60
+
+        fretboard_pixel_start = int(scaled_width * fretboard_start_ratio)
+        fretboard_pixel_end = int(scaled_width * fretboard_end_ratio)
+        fretboard_pixel_width = fretboard_pixel_end - fretboard_pixel_start
+
+        string_pixel_top = int(scaled_height * string_top_ratio)
+        string_pixel_bottom = int(scaled_height * string_bottom_ratio)
+        string_pixel_height = string_pixel_bottom - string_pixel_top
+
+        # Calculate fret positions using equal temperament
+        self.fret_positions = []
+        for fret in range(self.num_frets + 1):
+            if fret == 0:
+                # Nut position
+                fret_x = x_offset + fretboard_pixel_start
+            else:
+                # Equal temperament: distance = scale_length * (1 - 1/2^(fret/12))
+                distance_ratio = 1 - (1 / (2 ** (fret / 12)))
+                fret_x = x_offset + fretboard_pixel_start + int(fretboard_pixel_width * distance_ratio)
+
+            self.fret_positions.append(fret_x)
+
+        # Calculate string positions (6 strings evenly spaced)
+        self.string_positions = []
+        for string_idx in range(6):
+            string_y = y_offset + string_pixel_top + int((string_pixel_height / 5) * string_idx)
+            self.string_positions.append(string_y)
+
+        # Draw note overlays
         self._draw_note_overlays(painter)
+
+
+    def _draw_note_overlays(self, painter: QPainter):
+        """Draw colored circles for highlighted notes."""
+        if not self.highlighted_notes or not hasattr(self, 'fret_positions'):
+            return
+
+        for string_idx, fret_num in self.highlighted_notes:
+            if fret_num >= len(self.fret_positions) - 1:
+                continue
+
+            if string_idx >= len(self.string_positions):
+                continue
+
+            # Calculate position
+            if fret_num == 0:
+                # Open string - place before nut
+                note_x = self.fret_positions[0] - 15
+            else:
+                # Between frets
+                note_x = (self.fret_positions[fret_num - 1] + self.fret_positions[fret_num]) / 2
+
+            note_y = self.string_positions[string_idx]
+
+            # Get color (default red for root, blue for others)
+            color = self.note_colors.get((string_idx, fret_num), QColor(239, 68, 68))  # Catppuccin red
+
+            # Draw circle
+            painter.setPen(QPen(color.darker(120), 2))
+            painter.setBrush(color)
+            painter.drawEllipse(QPointF(note_x, note_y), 12, 12)
+
+            # Draw note name if enabled
+            if self.show_note_names:
+                painter.setPen(QColor(255, 255, 255))
+                painter.setFont(QFont("Arial", 8, QFont.Weight.Bold))
+                # TODO: Get actual note name from tuning + fret
+                # painter.drawText(...)
     
     def _draw_strings(self, painter: QPainter, x: int, y: int, width: int, height: int):
         """Draw guitar strings."""
@@ -250,43 +259,7 @@ class FretboardWidget(QWidget):
                     # Single dot
                     painter.drawEllipse(QPointF(center_x, center_y), 8, 8)
     
-    def _draw_note_overlays(self, painter: QPainter):
-        """Draw colored circles for highlighted notes."""
-        if not self.highlighted_notes or not hasattr(self, 'fret_positions'):
-            return
-        
-        num_strings = 6
-        string_spacing = self.fretboard_height / (num_strings + 1)
-        
-        for string_idx, fret_num in self.highlighted_notes:
-            if fret_num >= len(self.fret_positions) - 1:
-                continue
-            
-            # Calculate position
-            if fret_num == 0:
-                # Open string (at nut)
-                note_x = self.fret_positions[0] - 15
-            else:
-                # Between frets
-                note_x = (self.fret_positions[fret_num - 1] + self.fret_positions[fret_num]) / 2
-            
-            note_y = self.fretboard_y + string_spacing * (string_idx + 1)
-            
-            # Get color (default red for root, blue for others)
-            color = self.note_colors.get((string_idx, fret_num), QColor(239, 68, 68))  # Catppuccin red
-            
-            # Draw circle
-            painter.setPen(QPen(color.darker(120), 2))
-            painter.setBrush(color)
-            painter.drawEllipse(QPointF(note_x, note_y), 12, 12)
-            
-            # Draw note name if enabled
-            if self.show_note_names:
-                painter.setPen(QColor(255, 255, 255))
-                painter.setFont(QFont("Arial", 8, QFont.Weight.Bold))
-                # TODO: Get actual note name from tuning + fret
-                # painter.drawText(...)
-    
+     
     def set_tuning(self, tuning: Tuning):
         """Change the guitar tuning."""
         self.tuning = tuning
