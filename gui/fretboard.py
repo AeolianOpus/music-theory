@@ -16,7 +16,7 @@ class FretboardWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.tuning = Tuning.from_preset("Standard (EADGBE)")
-        self.num_frets = 22
+        self.num_frets = 21
         self.highlighted_notes: set[tuple[int, int]] = set()
         self.note_colors: dict[tuple[int, int], QColor] = {}
         self.show_note_names = True
@@ -118,12 +118,12 @@ class FretboardWidget(QWidget):
 
         # Calculate fret and string positions
         # Fretboard starts at ~35% from left, ends at ~95% from left
-        fretboard_start_ratio = 0.35
-        fretboard_end_ratio = 0.95
+        fretboard_start_ratio = 0.05
+        fretboard_end_ratio = 0.7125
 
         # Strings are between ~40% and ~60% of height (center band)
-        string_top_ratio = 0.40
-        string_bottom_ratio = 0.60
+        string_top_ratio = 0.43
+        string_bottom_ratio = 0.57
 
         fretboard_pixel_start = int(scaled_width * fretboard_start_ratio)
         fretboard_pixel_end = int(scaled_width * fretboard_end_ratio)
@@ -137,13 +137,12 @@ class FretboardWidget(QWidget):
         self.fret_positions = []
         for fret in range(self.num_frets + 1):
             if fret == 0:
-                # Nut position
-                fret_x = x_offset + fretboard_pixel_start
+                # Nut position (right side)
+                fret_x = x_offset + fretboard_pixel_end
             else:
-                # Equal temperament: distance = scale_length * (1 - 1/2^(fret/12))
+                # Higher frets go left
                 distance_ratio = 1 - (1 / (2 ** (fret / 12)))
-                fret_x = x_offset + fretboard_pixel_start + int(fretboard_pixel_width * distance_ratio)
-
+                fret_x = x_offset + fretboard_pixel_end - int(fretboard_pixel_width * distance_ratio)
             self.fret_positions.append(fret_x)
 
         # Calculate string positions (6 strings evenly spaced)
@@ -154,6 +153,17 @@ class FretboardWidget(QWidget):
 
         # Draw note overlays
         self._draw_note_overlays(painter)
+        # DEBUG - draw calibration lines
+        painter.setPen(QPen(QColor(255, 0, 0), 2))
+        painter.drawLine(x_offset + int(scaled_width * fretboard_start_ratio), y_offset, 
+                         x_offset + int(scaled_width * fretboard_start_ratio), y_offset + scaled_height)
+        painter.drawLine(x_offset + int(scaled_width * fretboard_end_ratio), y_offset,
+                         x_offset + int(scaled_width * fretboard_end_ratio), y_offset + scaled_height)
+        painter.setPen(QPen(QColor(0, 255, 0), 2))
+        painter.drawLine(x_offset, y_offset + int(scaled_height * string_top_ratio),
+                         x_offset + scaled_width, y_offset + int(scaled_height * string_top_ratio))
+        painter.drawLine(x_offset, y_offset + int(scaled_height * string_bottom_ratio),
+                         x_offset + scaled_width, y_offset + int(scaled_height * string_bottom_ratio))
 
 
     def _draw_note_overlays(self, painter: QPainter):
@@ -182,16 +192,28 @@ class FretboardWidget(QWidget):
             color = self.note_colors.get((string_idx, fret_num), QColor(239, 68, 68))  # Catppuccin red
 
             # Draw circle
+            if fret_num == 0:
+                radius = 8
+            elif fret_num < len(self.fret_positions) - 1:
+                spacing = abs(self.fret_positions[fret_num] - self.fret_positions[fret_num - 1])
+                radius = max(6, min(11, int(spacing * 0.35)))
+            else:
+                radius = 6
+
             painter.setPen(QPen(color.darker(120), 2))
             painter.setBrush(color)
-            painter.drawEllipse(QPointF(note_x, note_y), 12, 12)
+            painter.drawEllipse(QPointF(note_x, note_y), radius, radius)
 
             # Draw note name if enabled
             if self.show_note_names:
                 painter.setPen(QColor(255, 255, 255))
                 painter.setFont(QFont("Arial", 8, QFont.Weight.Bold))
-                # TODO: Get actual note name from tuning + fret
-                # painter.drawText(...)
+                note_label = self.tuning.note_name_at(string_idx, fret_num)
+                painter.drawText(
+                    int(note_x - radius), int(note_y - radius), radius*2, radius*2,
+                    Qt.AlignmentFlag.AlignCenter,
+                    note_label,
+                )
     
     def _draw_strings(self, painter: QPainter, x: int, y: int, width: int, height: int):
         """Draw guitar strings."""

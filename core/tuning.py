@@ -71,7 +71,7 @@ class Tuning:
     name: str
     string_midi: tuple[int, ...]   # MIDI note per string, low→high
     instrument: str = "guitar"     # "guitar", "bass", "custom"
-    num_frets: int = 24
+    num_frets: int = 21
 
     @classmethod
     def from_preset(cls, preset_name: str) -> "Tuning":

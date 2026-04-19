@@ -46,6 +46,7 @@ class MainWindow(QMainWindow):
 
         # Connect scale selection to fretboard
         self.chord_builder.scale_selected.connect(self._update_fretboard_from_scale)
+        self.chord_builder.progression_changed.connect(self._update_fretboard_from_progression)
 
         self.tabs.addTab(self._placeholder("Piano Keyboard",
             "Interactive piano keyboard for visualizing scales and chords.\n"
@@ -104,18 +105,48 @@ class MainWindow(QMainWindow):
         lay.addWidget(lbl_status)
         return w
 
+    def _note_positions(self, pitch_classes, root_pc=None):
+        from PySide6.QtGui import QColor
+        tuning = self.fretboard.tuning
+        positions = set()
+        colors = {}
+        ROOT_COLOR = QColor(249, 226, 175)   # gold — root
+        TONE_COLOR = QColor(137, 180, 250)   # blue — other tones
+        for string_idx in range(tuning.num_strings):
+            for pc in pitch_classes:
+                for fret in tuning.fret_for_note(string_idx, pc):
+                    pos = (string_idx, fret)
+                    positions.add(pos)
+                    colors[pos] = ROOT_COLOR if pc == root_pc else TONE_COLOR
+        return positions, colors
+
     def _update_fretboard_from_scale(self, scale_match):
-        """Update fretboard visualization when a scale is selected."""
-        # Extract scale notes from the match
-        scale_notes = scale_match.scale.notes
+        scale = scale_match.scale
+        pitch_classes = set(scale_match.scale.pitch_classes)
+        root_pc = scale_match.scale.root % 12
+        positions, colors = self._note_positions(pitch_classes, root_pc)
+        self.fretboard.highlight_notes(positions, colors)
+        self.tabs.setCurrentWidget(self.fretboard)
 
-        # TODO: Calculate fret positions for each note across all strings
-        # For now, just log it
-        print(f"Scale selected: {scale_match.scale.name} - Notes: {scale_notes}")
-
-        # You'll need to implement the logic to map notes to (string, fret) positions
-        # based on the current tuning, then call:
-        # self.fretboard.highlight_notes(positions, colors)
+    def _update_fretboard_from_progression(self, progression):
+        from PySide6.QtGui import QColor
+        if not progression.chords:
+            self.fretboard.clear_highlights()
+            return
+        all_pcs = set()
+        root_pcs = set()
+        for chord in progression.chords:
+            for pc in chord.pitch_classes:
+                all_pcs.add(pc % 12)
+            root_pcs.add(chord.root % 12)
+        positions, colors = self._note_positions(all_pcs)
+        ROOT_COLOR = QColor(249, 226, 175)
+        tuning = self.fretboard.tuning
+        for (string_idx, fret) in positions:
+            pc = tuning.note_at(string_idx, fret) % 12
+            if pc in root_pcs:
+                colors[(string_idx, fret)] = ROOT_COLOR
+        self.fretboard.highlight_notes(positions, colors)
     
     def _apply_theme(self):
         """Apply dark theme QSS."""
