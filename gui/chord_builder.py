@@ -7,8 +7,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt
 
 from core.audio_engine import AudioEngine, PIANO_CHANNEL
-from core.music_theory import QUALITY_FULL_NAMES, Chord, ChordProgression, SHARP_NAMES, CHORD_FORMULAS, QUALITY_DISPLAY, QUALITY_FULL_NAMES
-from core.scale_matcher import suggest_scales
+from core.music_theory import QUALITY_FULL_NAMES, Chord, ChordProgression, SHARP_NAMES, GUITAR_NAMES, CHORD_FORMULAS, QUALITY_DISPLAY, QUALITY_FULL_NAMES, note_name
+from core.scale_matcher import suggest_scales, detect_key
 
 # Chord quality categories for button layout
 QUALITY_CATEGORIES = {
@@ -52,7 +52,7 @@ class ChordBuilder(QWidget):
         input_row.addWidget(QLabel("Root:"))
         self.root_group = QButtonGroup(self)
         self.root_buttons: list[QPushButton] = []
-        for i, name in enumerate(SHARP_NAMES):
+        for i, name in enumerate(GUITAR_NAMES):
             btn = QPushButton(name)
             btn.setCheckable(True)
             btn.setFixedWidth(48)
@@ -132,8 +132,11 @@ class ChordBuilder(QWidget):
 
         # ── Current progression display ──
         self.progression_label = QLabel("Progression: (empty)")
+        self.key_label = QLabel("")
         self.progression_label.setStyleSheet("font-size: 16px; padding: 10px;")
+        self.key_label.setStyleSheet("color: #89b4fa; font-size: 11pt; padding: 4px;")
         layout.addWidget(self.progression_label)
+        layout.addWidget(self.key_label)
 
         # ── Find scales button ──
         self.find_btn = QPushButton("Find Matching Scales")
@@ -222,7 +225,7 @@ class ChordBuilder(QWidget):
         self.is_playing_progression = False     
 
     def _add_chord(self) -> None:
-        root = SHARP_NAMES[self.root_group.checkedId()]
+        root = GUITAR_NAMES[self.root_group.checkedId()]
         # Get selected category and quality
         category_id = self.category_group.checkedId()
         category_name = list(QUALITY_CATEGORIES.keys())[category_id]
@@ -262,6 +265,34 @@ class ChordBuilder(QWidget):
         
         text = " - ".join(chord_displays)
         self.progression_label.setText(f"Progression: {text}")
+        
+        if len(self.progression.chords) >= 3:
+            key_info = detect_key(self.progression)
+            print(f"DEBUG key_info: {key_info}")
+            if key_info:
+                # Only show if the winner is clearly ahead of the runner-up
+                chord_pcs = self.progression.all_pitch_classes
+                best_coverage = len(chord_pcs & key_info["scale"].pitch_class_set) / len(chord_pcs)
+                alt_coverage = len(chord_pcs & key_info["alternative"].pitch_class_set) / len(chord_pcs)
+                print(f"DEBUG best={best_coverage:.2f} alt={alt_coverage:.2f} diff={best_coverage-alt_coverage:.2f}")
+
+                if best_coverage - alt_coverage >= 0.05:
+                    display = key_info["display"].replace("Key of ", "")
+                    self.key_label.setText(f"Tonal center: {display}")
+                elif best_coverage >= 0.9:
+                    # Tied — show both honestly
+                    best_disp = key_info["display"].replace("Key of ", "")
+                    # Format alternative too
+                    alt_scale = key_info["alternative"]
+                    alt_root = note_name(alt_scale.root)
+                    alt_qual = "minor" if "Aeolian" in alt_scale.name else alt_scale.name
+                    self.key_label.setText(f"Ambiguous: {best_disp} or {alt_root} {alt_qual}")
+                else:
+                    self.key_label.setText("")
+            else:
+                self.key_label.setText("")
+        else:
+            self.key_label.setText("")
 
     def _find_scales(self):
         if not self.progression.chords:

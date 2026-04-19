@@ -63,7 +63,9 @@ def match_scale(progression: ChordProgression, scale: Scale,
     coverage = len(covered) / len(chord_pcs) if chord_pcs else 0.0
     economy = 1.0 - (len(extra) / len(scale_pcs)) if scale_pcs else 0.0
 
-    score = (coverage * coverage_weight) + (economy * economy_weight)
+    # Prefer 7-note scales; slightly penalize larger scales
+    size_penalty = max(0, len(scale_pcs) - 7) * 0.02
+    score = (coverage * coverage_weight) + (economy * economy_weight) - size_penalty
 
     return ScaleMatch(
         scale=scale,
@@ -186,3 +188,79 @@ def analyze_chord_in_scale(chord: Chord, scale: Scale) -> dict:
         "total_tones": len(chord_pcs),
         "missing_notes": [note_name(pc) for pc in sorted(missing)],
     }
+    
+def detect_key(progression: ChordProgression) -> Optional[dict]:
+    """
+    Detect the most likely key (major or minor) for a chord progression.
+
+    Returns a dict with:
+    - "scale": the best-matching Scale (Ionian or Aeolian)
+    - "confidence": 0.0-1.0 based on how well it fits
+    - "alternative": second-best Scale (often the relative major/minor)
+    - "display": formatted string like "A major" or "F# minor"
+
+    Returns None if the progression is empty.
+    """
+    if not progression.chords:
+        return None
+
+    chord_pcs = progression.all_pitch_classes
+    if not chord_pcs:
+        return None
+
+    first_root = progression.chords[0].root
+    last_root = progression.chords[-1].root
+
+    candidates: list[tuple[Scale, float]] = []
+
+    for root in range(12):
+        for scale_name in (
+            "Ionian (Major)",
+            "Aeolian (Natural Minor)",
+            "Harmonic Minor",
+            "Melodic Minor",
+            "Dorian",
+            "Phrygian",
+            "Mixolydian",
+            "Phrygian Dominant",
+        ):
+            scale = Scale.create(root, scale_name)
+            covered = chord_pcs & scale.pitch_class_set
+            coverage = len(covered) / len(chord_pcs)
+
+            # Tiebreaker: bonus if tonic matches first or last chord root
+            tonic_bonus = 0.0
+            if root == first_root:
+                tonic_bonus += 0.05
+            if root == last_root:
+                tonic_bonus += 0.05
+
+            score = coverage + tonic_bonus
+            candidates.append((scale, score))
+
+    # Sort by score descending
+    candidates.sort(key=lambda x: x[1], reverse=True)
+    best_scale, best_score = candidates[0]
+    alt_scale, _ = candidates[1]
+
+    # Format display name: "A major" / "F# minor"
+    # Map scale names to friendly labels
+    quality_labels = {
+        "Ionian (Major)": "major",
+        "Aeolian (Natural Minor)": "minor",
+        "Harmonic Minor": "harmonic minor",
+        "Melodic Minor": "melodic minor",
+        "Dorian": "Dorian",
+        "Phrygian": "Phrygian",
+        "Mixolydian": "Mixolydian",
+        "Phrygian Dominant": "Phrygian Dominant",
+    }
+    quality = quality_labels.get(best_scale.name, best_scale.name)
+    display = f"{note_name(best_scale.root)} {quality}"
+
+    return {
+        "scale": best_scale,
+        "confidence": min(best_score, 1.0),
+        "alternative": alt_scale,
+        "display": display,
+}

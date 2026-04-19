@@ -11,6 +11,7 @@ from typing import Optional
 # Sharps are the canonical representation; flats are aliases for display.
 SHARP_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 FLAT_NAMES  = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
+GUITAR_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
 
 # Lookup: name → pitch class (handles both sharp and flat input)
 NAME_TO_PC: dict[str, int] = {}
@@ -24,12 +25,14 @@ for i, name in enumerate(FLAT_NAMES):
 NAME_TO_PC.update({"Cb": 11, "cb": 11, "B#": 0, "b#": 0,
                     "E#": 5, "e#": 5, "Fb": 4, "fb": 4})
 
+USE_GUITAR_NAMES = True
 
 def note_name(pc: int, prefer_flat: bool = False) -> str:
     """Return the display name for a pitch class (0-11)."""
     pc = pc % 12
+    if USE_GUITAR_NAMES:
+        return GUITAR_NAMES[pc]
     return FLAT_NAMES[pc] if prefer_flat else SHARP_NAMES[pc]
-
 
 def parse_note(name: str) -> int:
     """Parse a note name string to pitch class. Raises ValueError if invalid."""
@@ -37,7 +40,6 @@ def parse_note(name: str) -> int:
     if name in NAME_TO_PC:
         return NAME_TO_PC[name]
     raise ValueError(f"Unknown note: '{name}'")
-
 
 # ── Intervals ─────────────────────────────────────────────────────────
 INTERVAL_NAMES = {

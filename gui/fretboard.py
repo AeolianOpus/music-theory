@@ -141,7 +141,8 @@ class FretboardWidget(QWidget):
                 fret_x = x_offset + fretboard_pixel_end
             else:
                 # Higher frets go left
-                distance_ratio = 1 - (1 / (2 ** (fret / 12)))
+                max_ratio = 1 - (1 / (2 ** (self.num_frets / 12)))
+                distance_ratio = (1 - (1 / (2 ** (fret / 12)))) / max_ratio
                 fret_x = x_offset + fretboard_pixel_end - int(fretboard_pixel_width * distance_ratio)
             self.fret_positions.append(fret_x)
 
@@ -150,29 +151,14 @@ class FretboardWidget(QWidget):
         for string_idx in range(6):
             string_y = y_offset + string_pixel_top + int((string_pixel_height / 5) * string_idx)
             self.string_positions.append(string_y)
-
-        # Draw note overlays
-        self._draw_note_overlays(painter)
-        # DEBUG - draw calibration lines
-        painter.setPen(QPen(QColor(255, 0, 0), 2))
-        painter.drawLine(x_offset + int(scaled_width * fretboard_start_ratio), y_offset, 
-                         x_offset + int(scaled_width * fretboard_start_ratio), y_offset + scaled_height)
-        painter.drawLine(x_offset + int(scaled_width * fretboard_end_ratio), y_offset,
-                         x_offset + int(scaled_width * fretboard_end_ratio), y_offset + scaled_height)
-        painter.setPen(QPen(QColor(0, 255, 0), 2))
-        painter.drawLine(x_offset, y_offset + int(scaled_height * string_top_ratio),
-                         x_offset + scaled_width, y_offset + int(scaled_height * string_top_ratio))
-        painter.drawLine(x_offset, y_offset + int(scaled_height * string_bottom_ratio),
-                         x_offset + scaled_width, y_offset + int(scaled_height * string_bottom_ratio))
-
-
+        
     def _draw_note_overlays(self, painter: QPainter):
         """Draw colored circles for highlighted notes."""
         if not self.highlighted_notes or not hasattr(self, 'fret_positions'):
             return
 
         for string_idx, fret_num in self.highlighted_notes:
-            if fret_num >= len(self.fret_positions) - 1:
+            if fret_num >= len(self.fret_positions):
                 continue
 
             if string_idx >= len(self.string_positions):
@@ -181,7 +167,7 @@ class FretboardWidget(QWidget):
             # Calculate position
             if fret_num == 0:
                 # Open string - place before nut
-                note_x = self.fret_positions[0] - 15
+                note_x = self.fret_positions[0]
             else:
                 # Between frets
                 note_x = (self.fret_positions[fret_num - 1] + self.fret_positions[fret_num]) / 2
@@ -194,7 +180,7 @@ class FretboardWidget(QWidget):
             # Draw circle
             if fret_num == 0:
                 radius = 8
-            elif fret_num < len(self.fret_positions) - 1:
+            elif fret_num < len(self.fret_positions):
                 spacing = abs(self.fret_positions[fret_num] - self.fret_positions[fret_num - 1])
                 radius = max(6, min(11, int(spacing * 0.35)))
             else:

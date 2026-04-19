@@ -65,7 +65,6 @@ SCALE_CATALOG: dict[str, tuple[int, ...]] = {
     "Hungarian Minor":          (0, 2, 3, 6, 7, 8, 11),
     "Hungarian Major":          (0, 3, 4, 6, 7, 9, 10),
     "Double Harmonic Major":    (0, 1, 4, 5, 7, 8, 11),
-    "Double Harmonic Minor":    (0, 2, 3, 6, 7, 8, 11),  # = Hungarian Minor
     "Neapolitan Minor":         (0, 1, 3, 5, 7, 8, 11),
     "Neapolitan Major":         (0, 1, 3, 5, 7, 9, 11),
     "Persian":                  (0, 1, 4, 5, 6, 8, 11),
@@ -92,11 +91,7 @@ SCALE_CATALOG: dict[str, tuple[int, ...]] = {
     "Pelog":                    (0, 1, 3, 7, 8),
     "Yo":                       (0, 2, 5, 7, 9),
     "Istrian":                  (0, 1, 3, 4, 6, 7),
-    "Ukranian Dorian":          (0, 2, 3, 6, 7, 9, 10),
-    "Romanian Minor":           (0, 2, 3, 6, 7, 9, 10),
-    "Acoustic (Lydian Dominant)":(0, 2, 4, 6, 7, 9, 10),
     "Algerian":                 (0, 2, 3, 6, 7, 8, 11),
-    "Mohammedan":               (0, 2, 3, 5, 7, 8, 11),  # = Harmonic Minor
 }
 
 # ── Scale Categories (for UI grouping) ────────────────────────────────
@@ -135,8 +130,7 @@ SCALE_CATEGORIES: dict[str, list[str]] = {
     ],
     "Other": [
         "Enigmatic", "Prometheus", "Tritone", "Leading Whole Tone",
-        "Iwato", "Kumoi", "Pelog", "Yo", "Istrian", "Ukranian Dorian",
-        "Romanian Minor", "Acoustic (Lydian Dominant)", "Algerian", "Mohammedan",
+        "Iwato", "Kumoi", "Pelog", "Yo", "Istrian", "Algerian",
     ],
 }
 
