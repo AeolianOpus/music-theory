@@ -95,6 +95,14 @@ def _find_tonic(progression: ChordProgression) -> Optional[tuple[int, str]]:
             return "ambiguous"
         return "ambiguous"
 
+    # Detect "all-dominants" context (blues, static dominant vamp, Mixolydian riff).
+    # If every chord is a dominant 7, no chord is acting as a V→I resolution — they're
+    # all stable tonics in their local context. Disable resolution-target voting.
+    all_dominants = (
+        len(progression.chords) >= 2
+        and all(_classify_quality(c) == "dominant" for c in progression.chords)
+    )
+    
     for i, chord in enumerate(progression.chords):
         # Position-based weight
         if i == 0:
@@ -109,13 +117,19 @@ def _find_tonic(progression: ChordProgression) -> Optional[tuple[int, str]]:
         # Dominant 7th / strong dominant chords: vote for their RESOLUTION target, not themselves
         # The resolution target of a V chord is a perfect 5th below (= perfect 4th above in octave)
         if quality_type == "dominant":
-            resolution_pc = (chord.root + 5) % 12  # perfect 4th up = resolution target
-            # The resolution is probably minor (common case: V7 → i in minor key)
-            # But could also be major (V7 → I). We vote for both and let cadence sort it out.
-            _add_vote(resolution_pc, position_weight * 1.2, "minor")
-            _add_vote(resolution_pc, position_weight * 0.8, "major")
-            # The chord itself gets a small vote (could be tonic of a blues vamp)
-            _add_vote(chord.root, position_weight * 0.3, "major")
+            # Blues/vamp context: dominant IS the tonic (blues I chord is dominant-quality).
+            # Also: a dominant 7 as the FIRST chord is almost always the tonic of a
+            # dominant-flavored context, not a V that resolves forward.
+            if all_dominants or i == 0:
+                _add_vote(chord.root, position_weight * 1.5, "major")
+            else:
+                resolution_pc = (chord.root + 5) % 12  # perfect 4th up = resolution target
+                # The resolution is probably minor (common case: V7 → i in minor key)
+                # But could also be major (V7 → I). We vote for both and let cadence sort it out.
+                _add_vote(resolution_pc, position_weight * 1.2, "minor")
+                _add_vote(resolution_pc, position_weight * 0.8, "major")
+                # The chord itself gets a small vote (could be tonic of a blues vamp)
+                _add_vote(chord.root, position_weight * 0.3, "major")
 
         elif quality_type == "minor":
             # Minor triads are strong tonic candidates (you play mostly minor keys)
@@ -215,6 +229,27 @@ def analyze_key(progression: ChordProgression) -> Optional[KeyAnalysis]:
     # Sort: prefer highest non-dominant coverage, then highest full coverage
     mode_fits.sort(key=lambda x: (-x[2], -x[3]))
     best_mode_name, best_mode_scale, best_non_dom_cov, best_full_cov = mode_fits[0]
+    
+    # "Natural minor + harmonic V" correction:
+    # When a progression contains a dominant V, harmonic minor often ties with natural
+    # minor on coverage because harmonic minor is a superset of the notes actually used
+    # (the differing 6th/7th happen to not appear in the non-V chords). The more honest
+    # musical description is "natural minor borrowing V from harmonic minor" — that's
+    # how a working musician thinks about it. So if the winner is a harmonic/melodic
+    # minor variant AND natural minor would also cover the non-V chords, switch to
+    # natural minor and let the harmonic-minor-V logic below tag the borrowing.
+    if (
+        tonic_quality == "minor"
+        and dominant_chords
+        and best_mode_name in ("Harmonic Minor", "Melodic Minor", "Hungarian Minor")
+    ):
+        aeolian = Scale.create(tonic_pc, "Aeolian (Natural Minor)")
+        non_dom_cov_aeolian = _coverage(non_dom_pcs, aeolian) if non_dom_pcs else 1.0
+        if non_dom_cov_aeolian >= 0.99:
+            best_mode_name = "Aeolian (Natural Minor)"
+            best_mode_scale = aeolian
+            best_non_dom_cov = non_dom_cov_aeolian
+            best_full_cov = _coverage(all_pcs, aeolian)
     
     # Detect mode-mixing systems
     parent_scales = [best_mode_scale]
