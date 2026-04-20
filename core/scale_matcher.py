@@ -189,62 +189,56 @@ def analyze_chord_in_scale(chord: Chord, scale: Scale) -> dict:
         "missing_notes": [note_name(pc) for pc in sorted(missing)],
     }
     
-def detect_key(progression: ChordProgression) -> Optional[dict]:
+def detect_key(progression: ChordProgression, min_coverage: float = 1.0) -> dict:
     """
-    Detect the most likely key (major or minor) for a chord progression.
-
-    Returns a dict with:
-    - "scale": the best-matching Scale (Ionian or Aeolian)
-    - "confidence": 0.0-1.0 based on how well it fits
-    - "alternative": second-best Scale (often the relative major/minor)
-    - "display": formatted string like "A major" or "F# minor"
-
-    Returns None if the progression is empty.
+    Find all keys and improv scales that can contain the progression's pitch classes.
+    
+    Args:
+        progression: The chord progression to analyze.
+        min_coverage: Minimum fraction of chord tones that must fit (1.0 = perfect).
+    
+    Returns:
+        A dict with two lists:
+            - "keys": 7-note diatonic and modal scales (tonal centers)
+            - "improv": 5-6 note pentatonic and blues scales (for soloing)
+        Each list contains dicts with "scale", "display", and "coverage".
+        Returns {"keys": [], "improv": []} if progression is empty.
     """
+    empty_result = {"keys": [], "improv": []}
+    
     if not progression.chords:
-        return None
-
+        return empty_result
+    
     chord_pcs = progression.all_pitch_classes
     if not chord_pcs:
-        return None
-
-    first_root = progression.chords[0].root
-    last_root = progression.chords[-1].root
-
-    candidates: list[tuple[Scale, float]] = []
-
-    for root in range(12):
-        for scale_name in (
-            "Ionian (Major)",
-            "Aeolian (Natural Minor)",
-            "Harmonic Minor",
-            "Melodic Minor",
-            "Dorian",
-            "Phrygian",
-            "Mixolydian",
-            "Phrygian Dominant",
-        ):
-            scale = Scale.create(root, scale_name)
-            covered = chord_pcs & scale.pitch_class_set
-            coverage = len(covered) / len(chord_pcs)
-
-            # Tiebreaker: bonus if tonic matches first or last chord root
-            tonic_bonus = 0.0
-            if root == first_root:
-                tonic_bonus += 0.05
-            if root == last_root:
-                tonic_bonus += 0.05
-
-            score = coverage + tonic_bonus
-            candidates.append((scale, score))
-
-    # Sort by score descending
-    candidates.sort(key=lambda x: x[1], reverse=True)
-    best_scale, best_score = candidates[0]
-    alt_scale, _ = candidates[1]
-
-    # Format display name: "A major" / "F# minor"
-    # Map scale names to friendly labels
+        return empty_result
+    
+    # 7-note scales — used as keys / tonal centers
+    key_scales = (
+        "Ionian (Major)",
+        "Aeolian (Natural Minor)",
+        "Harmonic Minor",
+        "Melodic Minor",
+        "Dorian",
+        "Phrygian",
+        "Lydian",
+        "Mixolydian",
+        "Locrian",
+        "Phrygian Dominant",
+        "Lydian Dominant",
+        "Hungarian Minor",
+        "Double Harmonic Major",
+    )
+    
+    # 5-6 note scales — used for improvisation over a key
+    improv_scales = (
+        "Minor Pentatonic",
+        "Major Pentatonic",
+        "Blues",
+        "Major Blues",
+    )
+    
+    # Display labels
     quality_labels = {
         "Ionian (Major)": "major",
         "Aeolian (Natural Minor)": "minor",
@@ -252,15 +246,44 @@ def detect_key(progression: ChordProgression) -> Optional[dict]:
         "Melodic Minor": "melodic minor",
         "Dorian": "Dorian",
         "Phrygian": "Phrygian",
+        "Lydian": "Lydian",
         "Mixolydian": "Mixolydian",
+        "Locrian": "Locrian",
         "Phrygian Dominant": "Phrygian Dominant",
+        "Lydian Dominant": "Lydian Dominant",
+        "Hungarian Minor": "Hungarian minor",
+        "Double Harmonic Major": "Double Harmonic major",
+        "Minor Pentatonic": "minor pentatonic",
+        "Major Pentatonic": "major pentatonic",
+        "Blues": "blues",
+        "Major Blues": "major blues",
     }
-    quality = quality_labels.get(best_scale.name, best_scale.name)
-    display = f"{note_name(best_scale.root)} {quality}"
-
+    
+    def _scan(scale_names: tuple) -> list[dict]:
+        results: list[dict] = []
+        for root in range(12):
+            for scale_name in scale_names:
+                scale = Scale.create(root, scale_name)
+                covered = chord_pcs & scale.pitch_class_set
+                coverage = len(covered) / len(chord_pcs)
+                
+                if coverage < min_coverage:
+                    continue
+                
+                quality = quality_labels.get(scale_name, scale_name)
+                display = f"{note_name(root)} {quality}"
+                
+                results.append({
+                    "scale": scale,
+                    "display": display,
+                    "coverage": coverage,
+                })
+        
+        # Sort purely by coverage (no commonness bias)
+        results.sort(key=lambda m: -m["coverage"])
+        return results
+    
     return {
-        "scale": best_scale,
-        "confidence": min(best_score, 1.0),
-        "alternative": alt_scale,
-        "display": display,
-}
+        "keys": _scan(key_scales),
+        "improv": _scan(improv_scales),
+    }

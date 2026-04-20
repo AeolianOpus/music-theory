@@ -135,6 +135,7 @@ class ChordBuilder(QWidget):
         self.key_label = QLabel("")
         self.progression_label.setStyleSheet("font-size: 16px; padding: 10px;")
         self.key_label.setStyleSheet("color: #89b4fa; font-size: 11pt; padding: 4px;")
+        self.key_label.setWordWrap(True)
         layout.addWidget(self.progression_label)
         layout.addWidget(self.key_label)
 
@@ -252,6 +253,7 @@ class ChordBuilder(QWidget):
         """Update progression display, optionally highlighting the current chord."""
         if not self.progression.chords:
             self.progression_label.setText("Progression: (empty)")
+            self.key_label.setText("")
             return
         
         # Build display with optional highlighting
@@ -266,31 +268,46 @@ class ChordBuilder(QWidget):
         text = " - ".join(chord_displays)
         self.progression_label.setText(f"Progression: {text}")
         
-        if len(self.progression.chords) >= 3:
-            key_info = detect_key(self.progression)
-            print(f"DEBUG key_info: {key_info}")
-            if key_info:
-                # Only show if the winner is clearly ahead of the runner-up
-                chord_pcs = self.progression.all_pitch_classes
-                best_coverage = len(chord_pcs & key_info["scale"].pitch_class_set) / len(chord_pcs)
-                alt_coverage = len(chord_pcs & key_info["alternative"].pitch_class_set) / len(chord_pcs)
-                print(f"DEBUG best={best_coverage:.2f} alt={alt_coverage:.2f} diff={best_coverage-alt_coverage:.2f}")
+        if len(self.progression.chords) >= 2:
+            lines = []
 
-                if best_coverage - alt_coverage >= 0.05:
-                    display = key_info["display"].replace("Key of ", "")
-                    self.key_label.setText(f"Tonal center: {display}")
-                elif best_coverage >= 0.9:
-                    # Tied — show both honestly
-                    best_disp = key_info["display"].replace("Key of ", "")
-                    # Format alternative too
-                    alt_scale = key_info["alternative"]
-                    alt_root = note_name(alt_scale.root)
-                    alt_qual = "minor" if "Aeolian" in alt_scale.name else alt_scale.name
-                    self.key_label.setText(f"Ambiguous: {best_disp} or {alt_root} {alt_qual}")
-                else:
-                    self.key_label.setText("")
+            # Try perfect match first
+            result = detect_key(self.progression, min_coverage=1.0)
+
+            # If nothing fits perfectly, relax to near-perfect
+            if not result["keys"] and not result["improv"]:
+                result = detect_key(self.progression, min_coverage=0.85)
+                label_prefix = "Closest"
             else:
-                self.key_label.setText("")
+                label_prefix = ""
+
+            # Last resort: even looser
+            if not result["keys"] and not result["improv"]:
+                result = detect_key(self.progression, min_coverage=0.70)
+                label_prefix = "Partial"
+
+            if result["keys"]:
+                key_displays = []
+                for m in result["keys"][:8]:
+                    if m["coverage"] < 1.0:
+                        key_displays.append(f"{m['display']} ({int(m['coverage']*100)}%)")
+                    else:
+                        key_displays.append(m["display"])
+                suffix = f"  (+{len(result['keys']) - 8} more)" if len(result["keys"]) > 8 else ""
+                header = f"{label_prefix} keys: " if label_prefix else "Keys: "
+                lines.append(f"{header}{', '.join(key_displays)}{suffix}")
+
+            if result["improv"]:
+                improv_displays = []
+                for m in result["improv"][:6]:
+                    if m["coverage"] < 1.0:
+                        improv_displays.append(f"{m['display']} ({int(m['coverage']*100)}%)")
+                    else:
+                        improv_displays.append(m["display"])
+                suffix = f"  (+{len(result['improv']) - 6} more)" if len(result["improv"]) > 6 else ""
+                lines.append(f"Improv over: {', '.join(improv_displays)}{suffix}")
+
+            self.key_label.setText("\n".join(lines) if lines else "")
         else:
             self.key_label.setText("")
 
