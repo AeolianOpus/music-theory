@@ -1,14 +1,15 @@
 from unicodedata import category
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QPushButton,
-    QLabel, QListWidget, QGroupBox, QListWidgetItem, QButtonGroup,
+    QWidget, QHBoxLayout, QLabel, QPushButton, QListWidget, QListWidgetItem,
+    QVBoxLayout, QGroupBox, QListView, QAbstractItemView,
 )
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Qt, Signal, QSize
 
 from core.audio_engine import AudioEngine, PIANO_CHANNEL
 from core.music_theory import QUALITY_FULL_NAMES, Chord, ChordProgression, SHARP_NAMES, GUITAR_NAMES, CHORD_FORMULAS, QUALITY_DISPLAY, QUALITY_FULL_NAMES, note_name
 from core.scale_matcher import suggest_scales, detect_key
+from core.key_analyzer import analyze_key
 
 # Chord quality categories for button layout
 QUALITY_CATEGORIES = {
@@ -27,6 +28,57 @@ RHYTHM_PATTERNS = {
     "Shuffle": [1.33, 0.67],  # Long-short swing feel
     "Blues (12-bar feel)": [2.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],  # Typical blues timing
 }
+
+class ChordChip(QWidget):
+    """A single chord chip: name + × button, draggable via the parent list."""
+
+    delete_requested = Signal(object)  # emits self
+
+    def __init__(self, chord_display: str, parent=None):
+        super().__init__(parent)
+        self.chord_display = chord_display
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 4, 4, 4)
+        layout.setSpacing(4)
+
+        self.label = QLabel(chord_display)
+        self.label.setStyleSheet(
+            "color: #cdd6f4; font-size: 14pt; font-weight: bold; background: transparent;"
+        )
+        layout.addWidget(self.label)
+
+        self.delete_btn = QPushButton("×")
+        self.delete_btn.setFixedSize(20, 20)
+        self.delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.delete_btn.setStyleSheet("""
+            QPushButton {
+                color: #a6adc8;
+                background: transparent;
+                border: none;
+                font-size: 14pt;
+                font-weight: bold;
+                padding: 0;
+            }
+            QPushButton:hover {
+                color: #f38ba8;
+            }
+        """)
+        self.delete_btn.clicked.connect(lambda: self.delete_requested.emit(self))
+        layout.addWidget(self.delete_btn)
+
+        self.setStyleSheet("""
+            ChordChip {
+                background-color: #313244;
+                border: 1px solid #45475a;
+                border-radius: 8px;
+            }
+            ChordChip:hover {
+                background-color: #45475a;
+                border-color: #89b4fa;
+            }
+        """)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
 
 class ChordBuilder(QWidget):
     # Signal other widgets can listen to (fretboard, piano, etc.)
@@ -130,13 +182,45 @@ class ChordBuilder(QWidget):
         self.category_group.buttonClicked.connect(self._update_quality_buttons)
         self._update_quality_buttons()
 
-        # ── Current progression display ──
-        self.progression_label = QLabel("Progression: (empty)")
+        # ── Current progression display (chip row) ──
+        progression_header = QLabel("Progression:")
+        progression_header.setStyleSheet("font-size: 13pt; padding: 4px 10px;")
+        layout.addWidget(progression_header)
+
+        self.progression_list = QListWidget()
+        self.progression_list.setFlow(QListView.Flow.LeftToRight)
+        self.progression_list.setWrapping(True)
+        self.progression_list.setResizeMode(QListView.ResizeMode.Adjust)
+        self.progression_list.setMovement(QListView.Movement.Snap)
+        self.progression_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.progression_list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.progression_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.progression_list.setSpacing(6)
+        self.progression_list.setFixedHeight(60)
+        self.progression_list.setStyleSheet("""
+            QListWidget {
+                background-color: #1e1e2e;
+                border: 1px solid #45475a;
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QListWidget::item:selected {
+                background: transparent;
+            }
+        """)
+        # Detect drag-drop reorder
+        self.progression_list.model().rowsMoved.connect(self._on_chips_reordered)
+        layout.addWidget(self.progression_list)
+
+        # Empty-state placeholder label (shown when no chords)
+        self.progression_empty_label = QLabel("(empty — add chords above)")
+        self.progression_empty_label.setStyleSheet("color: #6c7086; font-style: italic; padding: 4px 10px;")
+        layout.addWidget(self.progression_empty_label)
+
+        # Key analysis label (kept separate)
         self.key_label = QLabel("")
-        self.progression_label.setStyleSheet("font-size: 16px; padding: 10px;")
-        self.key_label.setStyleSheet("color: #89b4fa; font-size: 11pt; padding: 4px;")
+        self.key_label.setStyleSheet("color: #89b4fa; font-size: 11pt; padding: 4px 10px;")
         self.key_label.setWordWrap(True)
-        layout.addWidget(self.progression_label)
         layout.addWidget(self.key_label)
 
         # ── Find scales button ──
@@ -250,64 +334,46 @@ class ChordBuilder(QWidget):
         self._update_progression_display()
     
     def _update_progression_display(self, current_index: int | None = None):
-        """Update progression display, optionally highlighting the current chord."""
+        """Update progression display with chord chips."""
+        # Clear existing chips
+        self.progression_list.clear()
+
         if not self.progression.chords:
-            self.progression_label.setText("Progression: (empty)")
+            self.progression_list.setVisible(False)
+            self.progression_empty_label.setVisible(True)
             self.key_label.setText("")
             return
-        
-        # Build display with optional highlighting
-        chord_displays = []
+
+        self.progression_list.setVisible(True)
+        self.progression_empty_label.setVisible(False)
+
+        # Build a chip for each chord
         for i, chord in enumerate(self.progression.chords):
             display = chord.display_name
             if current_index is not None and i == current_index:
-                # Highlight current chord
-                display = f"► {display} ◄"
-            chord_displays.append(display)
-        
-        text = " - ".join(chord_displays)
-        self.progression_label.setText(f"Progression: {text}")
-        
+                display = f"▶ {display}"
+
+            chip = ChordChip(display)
+            chip.delete_requested.connect(self._on_chip_delete)
+
+            item = QListWidgetItem()
+            item.setSizeHint(chip.sizeHint() + QSize(8, 8))
+            self.progression_list.addItem(item)
+            self.progression_list.setItemWidget(item, chip)
+
+        # Update key analysis
         if len(self.progression.chords) >= 2:
-            lines = []
-
-            # Try perfect match first
-            result = detect_key(self.progression, min_coverage=1.0)
-
-            # If nothing fits perfectly, relax to near-perfect
-            if not result["keys"] and not result["improv"]:
-                result = detect_key(self.progression, min_coverage=0.85)
-                label_prefix = "Closest"
+            analysis = analyze_key(self.progression)
+            if analysis and analysis.confidence >= 0.7:
+                lines = [f"Key: {analysis.display}"]
+                scale_names = [s.display_name for s in analysis.parent_scales]
+                if len(scale_names) > 1:
+                    lines.append(f"Scales in play: {' + '.join(scale_names)}")
+                for note in analysis.notes:
+                    lines.append(f"— {note}")
+                self.key_label.setText("\n".join(lines))
             else:
-                label_prefix = ""
-
-            # Last resort: even looser
-            if not result["keys"] and not result["improv"]:
-                result = detect_key(self.progression, min_coverage=0.70)
-                label_prefix = "Partial"
-
-            if result["keys"]:
-                key_displays = []
-                for m in result["keys"][:8]:
-                    if m["coverage"] < 1.0:
-                        key_displays.append(f"{m['display']} ({int(m['coverage']*100)}%)")
-                    else:
-                        key_displays.append(m["display"])
-                suffix = f"  (+{len(result['keys']) - 8} more)" if len(result["keys"]) > 8 else ""
-                header = f"{label_prefix} keys: " if label_prefix else "Keys: "
-                lines.append(f"{header}{', '.join(key_displays)}{suffix}")
-
-            if result["improv"]:
-                improv_displays = []
-                for m in result["improv"][:6]:
-                    if m["coverage"] < 1.0:
-                        improv_displays.append(f"{m['display']} ({int(m['coverage']*100)}%)")
-                    else:
-                        improv_displays.append(m["display"])
-                suffix = f"  (+{len(result['improv']) - 6} more)" if len(result["improv"]) > 6 else ""
-                lines.append(f"Improv over: {', '.join(improv_displays)}{suffix}")
-
-            self.key_label.setText("\n".join(lines) if lines else "")
+                self.key_label.setText("")
         else:
             self.key_label.setText("")
 
@@ -445,4 +511,47 @@ class ChordBuilder(QWidget):
         self.stop_progression_btn.setEnabled(False)
         self.play_progression_btn.setEnabled(True)
         if self.audio and self.audio.is_ready:
-            self.audio.all_notes_off()    
+            self.audio.all_notes_off()
+            
+    def _on_chip_delete(self, chip: ChordChip):
+        """User clicked × on a chord chip."""
+        # Find which row this chip corresponds to
+        for row in range(self.progression_list.count()):
+            item = self.progression_list.item(row)
+            if self.progression_list.itemWidget(item) is chip:
+                # Remove from the underlying data
+                del self.progression.chords[row]
+                # Rerender
+                self._update_progression_display()
+                self.progression_changed.emit(self.progression)
+                break
+
+    def _on_chips_reordered(self, *args):
+        """User dragged a chip to a new position. Resync self.progression.chords."""
+        new_chords = []
+        for row in range(self.progression_list.count()):
+            item = self.progression_list.item(row)
+            chip = self.progression_list.itemWidget(item)
+            if not isinstance(chip, ChordChip):
+                continue
+            if chip is None:
+                continue
+            # Match the chip's display text back to a chord
+            # Strip any "▶ " prefix from playback highlighting
+            display = chip.chord_display.replace("▶ ", "").strip()
+            # Find matching chord object (by display name, in current progression)
+            # Since display names are unique-ish but could repeat, we consume them in order
+            for idx, c in enumerate(self.progression.chords):
+                if c.display_name == display and c not in new_chords[:]:
+                    new_chords.append(c)
+                    break
+
+        # If something went weird (count mismatch), bail out and just rerender from current data
+        if len(new_chords) != len(self.progression.chords):
+            self._update_progression_display()
+            return
+
+        self.progression.chords = new_chords
+        # Rerender to be consistent (no infinite loop — chip count matches)
+        self._update_progression_display()
+        self.progression_changed.emit(self.progression)    
