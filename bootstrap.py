@@ -12,29 +12,32 @@ def patch_fluidsynth_venv():
     """Auto-patch pyfluidsynth in venv to find FluidSynth DLL on Windows."""
     if sys.platform != "win32":
         return
-    
+
     venv_fluidsynth = Path("venv/Lib/site-packages/fluidsynth.py")
-    
+
     if not venv_fluidsynth.exists():
         return
-    
+
     try:
         content = venv_fluidsynth.read_text()
-        
+
         if "# Auto-patched for Scoop FluidSynth" in content:
             return  # Already patched
-        
+
+        home = Path.home()
         lines = content.split('\n')
         for i, line in enumerate(lines):
             if 'from ctypes.util import find_library' in line:
-                patch = """
-# Auto-patched for Scoop FluidSynth support
+                patch = f"""
+# Auto-patched for FluidSynth support (Scoop + manual installs)
 if hasattr(os, 'add_dll_directory'):
-    scoop_paths = [
-        r'C:\\ProgramData\\scoop\\apps\\fluidsynth\\2.5.2\\bin',
-        r'C:\\Users\\Constantine\\scoop\\apps\\fluidsynth\\2.5.2\\bin',
+    search_paths = [
+        r'C:\\ProgramData\\scoop\\apps\\fluidsynth\\current\\bin',
+        r'{home}\\scoop\\apps\\fluidsynth\\current\\bin',
+        r'C:\\tools\\fluidsynth\\bin',
+        r'C:\\Program Files\\FluidSynth\\bin',
     ]
-    for path in scoop_paths:
+    for path in search_paths:
         if os.path.exists(path):
             os.add_dll_directory(path)
 """
