@@ -80,6 +80,7 @@ print(f"  Chord qualities: {len(Chord.parse('C').intervals)}")  # just checking 
 separator("Key Analyzer")
 
 key_cases = [
+    # ── original cases (should still pass) ──
     (['A7', 'D7', 'A7', 'E7'], 'Blues — tonic should be A, not D'),
     (['Am', 'Dm', 'E7', 'Am'], 'Should say "harmonic minor V", not pure HM'),
     (['Am', 'G', 'F', 'E'],    'Should still say "harmonic minor V"'),
@@ -88,6 +89,13 @@ key_cases = [
     (['E7', 'E7', 'E7', 'E7', 'A7', 'A7', 'E7', 'E7', 'B7', 'A7', 'E7', 'B7'],
                                '12-bar blues in E — tonic should be E'),
     (['Am', 'E7', 'Am', 'E7'], 'Neoclassical HM vamp'),
+    # ── A2 fixes (these previously failed Stage 2) ──
+    (['C', 'D7', 'G', 'C'],    'A2: should now say C major (V/V borrow), not Lydian'),
+    (['Am', 'A7', 'Dm', 'E7', 'Am'], 'A2: should now say A minor + borrows, not chromatic'),
+    (['C', 'Eb', 'F', 'Bb'],   'A2: should now say C major + borrows, not Mixolydian'),
+    # ── A2 protection: real modal pieces should NOT get downgraded ──
+    (['Cmaj7', 'D', 'F#m', 'Bm7'], 'A2 protection: real Lydian — F# in 3/4 chords'),
+    (['G', 'F', 'G', 'F'],     'A2 protection: real G Mixolydian — F in 2/4 chords'),
 ]
 for syms, note in key_cases:
     r = analyze_key(ChordProgression.parse(syms))

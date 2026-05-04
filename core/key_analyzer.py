@@ -250,19 +250,74 @@ def analyze_key(progression: ChordProgression) -> Optional[KeyAnalysis]:
             best_mode_scale = aeolian
             best_non_dom_cov = non_dom_cov_aeolian
             best_full_cov = _coverage(all_pcs, aeolian)
-    
-    # Detect mode-mixing systems
+
+    # "Common key + borrowed chords" correction (Approach A2):
+    # Coverage-based ranking sometimes picks an exotic mode (Lydian, Mixolydian,
+    # Dorian-as-parent, etc.) only because that mode happens to contain a chromatic
+    # note from a single borrowed chord. A working musician reads the same progression
+    # as the parallel common mode (Ionian/Aeolian) plus a borrowing — which is also
+    # the more useful labeling for soloing and Roman numeral analysis.
+    #
+    # Discriminator: the kind of chord that uses the distinctive pitch.
+    #   - dominant-7 chord uses it → transient borrowing (V/V, V/iv, etc.)
+    #   - stable triad / maj7 / min7 / etc. uses it → structural mode feature
+    # Real Dorian has IV major (stable). Real Lydian has II major (stable).
+    # A V/V borrowing in a major key has D7 (dominant) — clearly different.
+    EXOTIC_MAJOR_MODES = ("Lydian", "Mixolydian", "Phrygian Dominant")
+    EXOTIC_MINOR_MODES = ("Dorian", "Phrygian", "Locrian")
+    is_exotic = best_mode_name in (EXOTIC_MAJOR_MODES + EXOTIC_MINOR_MODES)
+    if is_exotic:
+        common_name = (
+            "Ionian (Major)" if tonic_quality == "major"
+            else "Aeolian (Natural Minor)"
+        )
+        common_scale = Scale.create(tonic_pc, common_name)
+        common_full_cov = _coverage(all_pcs, common_scale)
+        distinctive_pcs = best_mode_scale.pitch_class_set - common_scale.pitch_class_set
+        DOMINANT_QUALITIES = ("7", "9", "11", "13", "7b5", "7#5", "7b9", "7#9", "aug7")
+        structural_uses = sum(
+            1 for c in progression.chords
+            if (c.pitch_class_set & distinctive_pcs)
+            and c.quality not in DOMINANT_QUALITIES
+        )
+        transient_uses = sum(
+            1 for c in progression.chords
+            if (c.pitch_class_set & distinctive_pcs)
+            and c.quality in DOMINANT_QUALITIES
+        )
+        n_chords = len(progression.chords)
+        distinctive_is_structural = structural_uses > 0
+        distinctive_ratio = (structural_uses + transient_uses) / n_chords if n_chords else 0.0
+        common_pcs = common_scale.pitch_class_set
+        chromatic_pcs_in_progression = all_pcs - common_pcs
+        multiple_chromatic_borrowings = len(chromatic_pcs_in_progression) >= 2
+
+        is_borrowing_via_dominant = (
+            common_full_cov >= 0.80
+            and not distinctive_is_structural
+            and distinctive_ratio < 0.5
+        )
+        is_borrowing_via_mixture = (
+            common_full_cov >= 0.65
+            and multiple_chromatic_borrowings
+        )
+        if is_borrowing_via_dominant or is_borrowing_via_mixture:
+            best_mode_name = common_name
+            best_mode_scale = common_scale
+            best_non_dom_cov = _coverage(non_dom_pcs, common_scale) if non_dom_pcs else 1.0
+            best_full_cov = common_full_cov
+
     parent_scales = [best_mode_scale]
     scale_system = "pure"
     notes: list[str] = []
-    
-    if dominant_chords and best_full_cov < 1.0 and best_non_dom_cov >= 0.95:
-        # Non-dominant chords fit the mode cleanly, but the V chord adds extra notes.
-        # Check if harmonic minor (or melodic minor for major keys) completes the picture.
+
+    if dominant_chords and best_full_cov < 1.0:
         if tonic_quality == "minor":
             hm_scale = Scale.create(tonic_pc, "Harmonic Minor")
-            combined_pcs = best_mode_scale.pitch_class_set | hm_scale.pitch_class_set
-            if all_pcs.issubset(combined_pcs):
+            v_chord_pcs: frozenset[int] = frozenset()
+            for c in dominant_chords:
+                v_chord_pcs = v_chord_pcs | c.pitch_class_set
+            if v_chord_pcs.issubset(hm_scale.pitch_class_set):
                 scale_system = "harmonic_minor_V"
                 parent_scales = [best_mode_scale, hm_scale]
                 notes.append(
@@ -270,7 +325,6 @@ def analyze_key(progression: ChordProgression) -> Optional[KeyAnalysis]:
                     f"(raised 7th: {note_name((tonic_pc + 11) % 12)})"
                 )
         else:
-            # Major key with borrowed chords — flag but don't auto-combine
             notes.append("Progression uses chromatic notes outside the parent scale")
     
     # Compute confidence
