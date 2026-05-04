@@ -141,6 +141,37 @@ for syms, label, expected in roman_cases:
     print(f"    {' - '.join(syms):35s} → {' '.join(got)}")
     if got != expected:
         print(f"    expected:                            {' '.join(expected)}")
+        
+# ── Chord-Scale Coach (Stage 3) ──
+separator("Chord-Scale Coach")
+from core.chord_scale_coach import analyze_chord_scales
+
+coach_cases = [
+    (['Am', 'Dm', 'E7', 'Am'],   'Neoclassical HM V'),
+    (['C', 'G', 'Am', 'F'],      'Pop I-V-vi-IV'),
+    (['Dm7', 'G7', 'Cmaj7'],     'Jazz ii-V-I'),
+    (['C', 'D7', 'G', 'C'],      'V/V secondary dominant'),
+    (['C', 'Eb', 'F', 'Bb'],     'Borrowed chords in C major'),
+    (['Dm', 'G', 'Dm', 'C'],     'D Dorian'),
+    (['A7', 'D7', 'A7', 'E7'],   'Blues in A (all dominants)'),
+]
+
+for syms, label in coach_cases:
+    prog = ChordProgression.parse(syms)
+    ka = analyze_key(prog)
+    if ka is None:
+        print(f"  ✗ {label}: key analysis failed")
+        continue
+    rl = analyze_roman(prog, ka)
+    advice = analyze_chord_scales(prog, ka, rl)
+    print(f"\n  {label}: {' - '.join(syms)}")
+    print(f"    Key: {ka.display}")
+    for adv, label_obj in zip(advice, rl):
+        print(f"    {adv.chord.display_name} ({label_obj.numeral}):")
+        for opt in adv.options:
+            tags = ','.join(opt.idioms)
+            print(f"      [{opt.priority}] {opt.scale.display_name:30s}  "
+                  f"— {opt.reason}  ({tags})")
 
 print(f"\n{'='*60}")
 print(f"  All core tests passed ✓")
