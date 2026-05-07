@@ -39,7 +39,7 @@ SCALE_CATALOG: dict[str, tuple[int, ...]] = {
     "Lydian Augmented":         (0, 2, 4, 6, 8, 9, 11),
     "Lydian Dominant":          (0, 2, 4, 6, 7, 9, 10),
     "Mixolydian b6":            (0, 2, 4, 5, 7, 8, 10),
-    "Aeolian b5 (Locrian #2)":  (0, 2, 3, 5, 6, 8, 10),
+    "Locrian #2":               (0, 2, 3, 5, 6, 8, 10),
     "Altered (Super Locrian)":  (0, 1, 3, 4, 6, 8, 10),
 
     # ── Pentatonic / Blues ────────────────────────────
@@ -107,7 +107,7 @@ SCALE_CATEGORIES: dict[str, list[str]] = {
     "Melodic Minor Modes": [
         "Melodic Minor", "Dorian b2", "Lydian Augmented",
         "Lydian Dominant", "Mixolydian b6",
-        "Aeolian b5 (Locrian #2)", "Altered (Super Locrian)",
+        "Locrian #2", "Altered (Super Locrian)",
     ],
     "Pentatonic & Blues": [
         "Major Pentatonic", "Minor Pentatonic", "Blues", "Major Blues",
