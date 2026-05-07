@@ -132,6 +132,11 @@ def _suggest_tonic(chord: Chord, ka: KeyAnalysis,
             "color", "i — exotic minor (raised 4th)",
             2, [IDIOM_NEOCLASSICAL],
         ))
+        opts.append(_opt(
+            Scale.create(root, "Bebop Minor"),
+            "perfect", "i — bebop minor (jazz chord-tone walk)",
+            1, [IDIOM_JAZZ],
+        ))
     else:
         # Major tonic
         opts.append(_opt(
@@ -177,6 +182,16 @@ def _suggest_tonic(chord: Chord, ka: KeyAnalysis,
             "color", "I — Lydian (bright #4 color)",
             1, [IDIOM_JAZZ, IDIOM_FUSION],
         ))
+        opts.append(_opt(
+            Scale.create(root, "Bebop Major"),
+            "perfect", "I — bebop major (jazz chord-tone walk)",
+            1, [IDIOM_JAZZ],
+        ))
+        opts.append(_opt(
+            Scale.create(root, "Lydian Augmented"),
+            "color", "I — Lydian augmented (Imaj7#5 sound)",
+            2, [IDIOM_JAZZ, IDIOM_FUSION],
+        ))
     return opts
 
 
@@ -212,6 +227,11 @@ def _suggest_dominant(chord: Chord, ka: KeyAnalysis,
         Scale.create(chord_root, "Diminished (HW)"),
         "tension", "V — half-whole dim (b9, #9, #11)",
         1, [IDIOM_JAZZ, IDIOM_FUSION],
+    ))
+    opts.append(_opt(
+        Scale.create(chord_root, "Bebop Dominant"),
+        "perfect", "V — bebop dominant (chord-tone alignment)",
+        1, [IDIOM_JAZZ],
     ))
     opts.append(_opt(
         Scale.create(chord_root, "Lydian Dominant"),
@@ -289,6 +309,11 @@ def _suggest_predominant(chord: Chord, ka: KeyAnalysis,
                          and "minor" in ka.display else "Ionian (Major)"),
             "perfect", f"{rl.numeral} — key's parent scale",
             1, [IDIOM_UNIVERSAL],
+        ))
+        opts.append(_opt(
+            Scale.create(chord_root, "Bebop Dorian"),
+            "perfect", f"{rl.numeral} — bebop Dorian (jazz minor walk)",
+            1, [IDIOM_JAZZ],
         ))
     else:
         # IV in major
