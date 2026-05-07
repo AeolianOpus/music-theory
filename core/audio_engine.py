@@ -61,6 +61,7 @@ GM_PROGRAMS: dict[str, int] = {
     "fretless_bass": 35,
     "slap_bass_1": 36,
     "synth_bass_1": 38,
+    "synth_bass_2": 39,
     "violin": 40,
     "cello": 42,
     "strings_ensemble": 48,
@@ -70,6 +71,31 @@ GM_PROGRAMS: dict[str, int] = {
     "trombone": 57,
     "organ": 16,
     "church_organ": 19,
+}
+# General MIDI drum note numbers (used on DRUM_CHANNEL).
+# These are MIDI note numbers, not program numbers.
+GM_DRUMS: dict[str, int] = {
+    "bass_drum": 36,        # acoustic bass drum
+    "kick": 36,             # alias
+    "side_stick": 37,
+    "snare": 38,            # acoustic snare
+    "hand_clap": 39,
+    "snare_electric": 40,
+    "low_tom": 41,
+    "closed_hat": 42,
+    "high_floor_tom": 43,
+    "pedal_hat": 44,
+    "low_mid_tom": 47,
+    "open_hat": 46,
+    "high_tom": 50,
+    "crash": 49,
+    "crash_2": 57,
+    "ride": 51,
+    "ride_bell": 53,
+    "tambourine": 54,
+    "splash": 55,
+    "cowbell": 56,
+    "china": 52,
 }
 
 # Drum channel in GM is channel 9 (0-indexed)
