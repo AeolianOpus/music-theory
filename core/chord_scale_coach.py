@@ -84,7 +84,8 @@ def _is_minor_quality(chord: Chord) -> bool:
 
 
 def _suggest_tonic(chord: Chord, ka: KeyAnalysis,
-                   rl: RomanLabel) -> list[ChordScaleOption]:
+                   rl: RomanLabel,
+                   progression: ChordProgression) -> list[ChordScaleOption]:
     """Tonic chord (i, I). The home base — most options live here."""
     opts: list[ChordScaleOption] = []
     is_minor = _is_minor_quality(chord)
@@ -148,14 +149,24 @@ def _suggest_tonic(chord: Chord, ka: KeyAnalysis,
             "color", "I — major blues scale",
             0, [IDIOM_ROCK_BLUES],
         ))
-        # Mixolydian if the key actually has bVII borrows (or is Mixolydian)
-        if ka.mode_name == "Mixolydian":
+        # Compute the b7 pitch class relative to the tonic to detect bVII borrows.
+        b7_pc = (root + 10) % 12
+        progression_has_b7 = any(
+            b7_pc in c.pitch_class_set for c in progression.chords
+        )
+        # Mixolydian: as the key's mode, OR when the progression includes a bVII borrow.
+        if ka.mode_name == "Mixolydian" or progression_has_b7:
+            reason = (
+                "I — Mixolydian (b7 in progression)" if ka.mode_name == "Mixolydian"
+                else "I — Mixolydian (matches bVII borrow)"
+            )
             opts.append(_opt(
                 Scale.create(root, "Mixolydian"),
-                "perfect", "I — Mixolydian (b7 in progression)",
+                "perfect", reason,
                 0, [IDIOM_UNIVERSAL, IDIOM_ROCK_BLUES, IDIOM_FUSION],
             ))
-        elif ka.mode_name == "Lydian":
+        # Lydian as key's mode (already handled at priority 1 below)
+        if ka.mode_name == "Lydian":
             opts.append(_opt(
                 Scale.create(root, "Lydian"),
                 "perfect", "I — Lydian (#4 in progression)",
@@ -170,7 +181,8 @@ def _suggest_tonic(chord: Chord, ka: KeyAnalysis,
 
 
 def _suggest_dominant(chord: Chord, ka: KeyAnalysis,
-                      rl: RomanLabel) -> list[ChordScaleOption]:
+                      rl: RomanLabel,
+                      progression: ChordProgression) -> list[ChordScaleOption]:
     """V or V7 (diatonic dominant). Distinct from V (HM) — see _suggest_v_hm."""
     opts: list[ChordScaleOption] = []
     chord_root = chord.root
@@ -210,7 +222,8 @@ def _suggest_dominant(chord: Chord, ka: KeyAnalysis,
 
 
 def _suggest_v_hm(chord: Chord, ka: KeyAnalysis,
-                  rl: RomanLabel) -> list[ChordScaleOption]:
+                  rl: RomanLabel,
+                  progression: ChordProgression) -> list[ChordScaleOption]:
     """V (HM) — V chord with raised 7th from harmonic minor. Yngwie territory."""
     opts: list[ChordScaleOption] = []
     chord_root = chord.root
@@ -245,7 +258,8 @@ def _suggest_v_hm(chord: Chord, ka: KeyAnalysis,
 
 
 def _suggest_predominant(chord: Chord, ka: KeyAnalysis,
-                         rl: RomanLabel) -> list[ChordScaleOption]:
+                         rl: RomanLabel,
+                         progression: ChordProgression) -> list[ChordScaleOption]:
     """ii, IV, iv chords. Lead-into-V flavor."""
     opts: list[ChordScaleOption] = []
     chord_root = chord.root
@@ -302,7 +316,8 @@ def _suggest_predominant(chord: Chord, ka: KeyAnalysis,
 
 
 def _suggest_secondary(chord: Chord, ka: KeyAnalysis,
-                       rl: RomanLabel) -> list[ChordScaleOption]:
+                       rl: RomanLabel,
+                       progression: ChordProgression) -> list[ChordScaleOption]:
     """V/V or V/iv — secondary dominant. Treat like a temporary V7."""
     opts: list[ChordScaleOption] = []
     chord_root = chord.root
@@ -336,7 +351,8 @@ def _suggest_secondary(chord: Chord, ka: KeyAnalysis,
 
 
 def _suggest_borrowed(chord: Chord, ka: KeyAnalysis,
-                      rl: RomanLabel) -> list[ChordScaleOption]:
+                      rl: RomanLabel,
+                      progression: ChordProgression) -> list[ChordScaleOption]:
     """bIII, bVI, bVII, etc. — modal mixture from parallel mode."""
     opts: list[ChordScaleOption] = []
     chord_root = chord.root
@@ -384,7 +400,8 @@ def _suggest_borrowed(chord: Chord, ka: KeyAnalysis,
 
 
 def _suggest_substitute(chord: Chord, ka: KeyAnalysis,
-                        rl: RomanLabel) -> list[ChordScaleOption]:
+                        rl: RomanLabel,
+                        progression: ChordProgression) -> list[ChordScaleOption]:
     """iii, vi, III, VI, VII — tonic-substitute color chords."""
     opts: list[ChordScaleOption] = []
     chord_root = chord.root
@@ -427,9 +444,41 @@ def _suggest_substitute(chord: Chord, ka: KeyAnalysis,
     ))
     return opts
 
+def _suggest_diminished(chord: Chord, ka: KeyAnalysis,
+                        rl: RomanLabel,
+                        progression: ChordProgression) -> list[ChordScaleOption]:
+    """Diminished chord — vii° in major, ii° in minor, or any dim/dim7."""
+    opts: list[ChordScaleOption] = []
+    chord_root = chord.root
+    key_tonic = ka.tonic_pc
+
+    opts.append(_opt(
+        Scale.create(chord_root, "Locrian"),
+        "perfect", f"{rl.numeral} — Locrian (chord-tone scale)",
+        0, [IDIOM_UNIVERSAL, IDIOM_JAZZ, IDIOM_FUSION],
+    ))
+    opts.append(_opt(
+        Scale.create(chord_root, "Diminished (WH)"),
+        "perfect", f"{rl.numeral} — whole-half diminished (matches dim7)",
+        0, [IDIOM_JAZZ, IDIOM_FUSION, IDIOM_NEOCLASSICAL],
+    ))
+    opts.append(_opt(
+        Scale.create(chord_root, "Locrian #2"),
+        "color", f"{rl.numeral} — Locrian #2 (m7b5 sound)",
+        1, [IDIOM_JAZZ, IDIOM_FUSION],
+    ))
+    # Key's parent scale also fits when the dim chord is diatonic (like vii° in major)
+    parent_scale_name = ka.parent_scales[0].name if ka.parent_scales else "Ionian (Major)"
+    opts.append(_opt(
+        Scale.create(key_tonic, parent_scale_name),
+        "perfect", f"{rl.numeral} — key's parent scale",
+        1, [IDIOM_UNIVERSAL],
+    ))
+    return opts
 
 def _suggest_unknown(chord: Chord, ka: KeyAnalysis,
-                     rl: RomanLabel) -> list[ChordScaleOption]:
+                     rl: RomanLabel,
+                     progression: ChordProgression) -> list[ChordScaleOption]:
     """Chromatic chord we couldn't classify. Suggest chord-tone arpeggio + chromatic."""
     opts: list[ChordScaleOption] = []
     chord_root = chord.root
@@ -460,8 +509,11 @@ def _suggest_unknown(chord: Chord, ka: KeyAnalysis,
 # Map Roman label functions/sources to suggestion builders.
 # Order of resolution: source overrides function. Specifically, "harmonic_minor"
 # source on a dominant chord routes to _suggest_v_hm, not _suggest_dominant.
-def _route(rl: RomanLabel):
-    """Pick the suggestion function for a Roman label."""
+def _route(rl: RomanLabel, chord: Chord):
+    """Pick the suggestion function for a Roman label + chord."""
+    # Chord quality overrides Roman function for diminished chords.
+    if chord.quality in ("dim", "dim7", "m7b5"):
+        return _suggest_diminished
     if rl.source == "harmonic_minor":
         return _suggest_v_hm
     if rl.source == "secondary_dominant":
@@ -517,17 +569,22 @@ def analyze_chord_scales(
 
     advice_list: list[ChordScaleAdvice] = []
     for chord, rl in zip(progression.chords, roman_labels):
-        builder = _route(rl)
-        opts = builder(chord, key_analysis, rl)
+        builder = _route(rl, chord)
+        opts = builder(chord, key_analysis, rl, progression)
 
-        # Inject blues scale on every chord in a blues context
-        # (it's only on tonic by default in non-blues keys).
+        # In a blues context, ensure every chord has a blues scale option.
+        # _suggest_tonic already adds blues for the tonic chord — only add it
+        # to NON-tonic chords here, and only if no blues option is already present.
         if is_blues_context:
-            opts.append(_opt(
-                Scale.create(chord.root, "Blues"),
-                "color", f"{chord.display_name} — blues scale (blues context)",
-                0, [IDIOM_ROCK_BLUES],
-            ))
+            already_has_blues = any(
+                "Blues" in o.scale.name for o in opts
+            )
+            if not already_has_blues:
+                opts.append(_opt(
+                    Scale.create(chord.root, "Blues"),
+                    "color", f"{chord.display_name} — blues scale (blues context)",
+                    0, [IDIOM_ROCK_BLUES],
+                ))
 
         # Sort by priority ascending, then by fit (perfect > tension > color),
         # so the most reachable options come first.

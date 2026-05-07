@@ -154,6 +154,7 @@ coach_cases = [
     (['C', 'Eb', 'F', 'Bb'],     'Borrowed chords in C major'),
     (['Dm', 'G', 'Dm', 'C'],     'D Dorian'),
     (['A7', 'D7', 'A7', 'E7'],   'Blues in A (all dominants)'),
+    (['C', 'G', 'Bdim', 'C'],    'vii° in major — Bdim should get Locrian'),
 ]
 
 for syms, label in coach_cases:
