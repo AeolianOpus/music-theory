@@ -10,3 +10,12 @@ venv/
 saves/*.json
 .idea/
 .vscode/
+# Soundfonts (large binary instrument data, kept local only)
+soundfonts/*.sf2
+soundfonts/*.sfpack
+soundfonts/*.sfark
+
+# Soundfonts (large binary instrument data, kept local only)
+soundfonts/*.sf2
+soundfonts/*.sfpack
+soundfonts/*.sfark

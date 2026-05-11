@@ -114,12 +114,14 @@ class AudioEngine:
 
     def __init__(self, soundfont_path: Optional[str] = None) -> None:
         self._synth: Any = None
-        self._sfid: Optional[int] = None
+        self._sfids: dict[str, int] = {}
+        self._default_sf_name: Optional[str] = None
         self._soundfont_path: Optional[str] = soundfont_path
         self._initialized: bool = False
         self._lock: threading.Lock = threading.Lock()
 
-    def initialize(self, soundfont_path: Optional[str] = None) -> bool:
+    def initialize(self, soundfont_path: Optional[str] = None,
+                   soundfont_name: str = "default") -> bool:
         """
         Initialize FluidSynth and load a SoundFont.
         Returns True on success, False if FluidSynth is not available.
@@ -165,20 +167,22 @@ class AudioEngine:
                     print("Error: new_fluid_audio_driver not available")
                     return False
                 
-                self._sfid = self._synth.sfload(sf_path)
-                if self._sfid == -1:
+                sfid = self._synth.sfload(sf_path)
+                if sfid == -1:
                     print("Failed to load SoundFont.")
                     return False
+                self._sfids[soundfont_name] = sfid
+                self._default_sf_name = soundfont_name
 
                 # Set up default instruments
-                self._synth.program_select(PIANO_CHANNEL, self._sfid, 0,
+                self._synth.program_select(PIANO_CHANNEL, sfid, 0,
                                            GM_PROGRAMS["acoustic_grand_piano"])
-                self._synth.program_select(GUITAR_CHANNEL, self._sfid, 0,
+                self._synth.program_select(GUITAR_CHANNEL, sfid, 0,
                                            GM_PROGRAMS["clean_electric"])
-                self._synth.program_select(BASS_CHANNEL, self._sfid, 0,
+                self._synth.program_select(BASS_CHANNEL, sfid, 0,
                                            GM_PROGRAMS["finger_bass"])
                 # Drum channel
-                self._synth.program_select(DRUM_CHANNEL, self._sfid, 128, 0)
+                self._synth.program_select(DRUM_CHANNEL, sfid, 128, 0)
 
                 self._initialized = True
                 return True
@@ -190,17 +194,48 @@ class AudioEngine:
     def is_ready(self) -> bool:
         return self._initialized and self._synth is not None
 
-    def set_instrument(self, channel: int, program: int) -> None:
-        """Change the GM instrument on a channel."""
+    def load_soundfont(self, name: str, path: str) -> bool:
+        """Load an additional SoundFont and register it under a name.
+        Returns True on success, False if not initialized, file missing, or load fails.
+        """
+        if not self.is_ready:
+            print("AudioEngine: not initialized; call initialize() first.")
+            return False
+        if not os.path.exists(path):
+            print(f"Warning: SoundFont not found at '{path}'.")
+            return False
+        if name in self._sfids:
+            print(f"AudioEngine: soundfont '{name}' already loaded; skipping.")
+            return True
+        with self._lock:
+            sfid = self._synth.sfload(path)
+            if sfid == -1:
+                print(f"Failed to load SoundFont '{name}' from '{path}'.")
+                return False
+            self._sfids[name] = sfid
+            return True
+    
+    def set_instrument(self, channel: int, program: int,
+                       soundfont_name: Optional[str] = None) -> None:
+        """Change the GM instrument on a channel.
+        If soundfont_name is None, uses the default soundfont.
+        """
         if not self.is_ready:
             return
+        sf_name = soundfont_name if soundfont_name is not None else self._default_sf_name
+        if sf_name is None or sf_name not in self._sfids:
+            return
+        sfid = self._sfids[sf_name]
         with self._lock:
-            self._synth.program_select(channel, self._sfid, 0, program)
+            self._synth.program_select(channel, sfid, 0, program)
 
-    def set_instrument_by_name(self, channel: int, name: str) -> None:
-        """Change instrument by name (see GM_PROGRAMS)."""
+    def set_instrument_by_name(self, channel: int, name: str,
+                               soundfont_name: Optional[str] = None) -> None:
+        """Change instrument by name (see GM_PROGRAMS).
+        If soundfont_name is None, uses the default soundfont.
+        """
         if name in GM_PROGRAMS:
-            self.set_instrument(channel, GM_PROGRAMS[name])
+            self.set_instrument(channel, GM_PROGRAMS[name], soundfont_name)
 
     def note_on(self, channel: int, midi_note: int, velocity: int = 100) -> None:
         """Trigger a note on."""

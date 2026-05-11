@@ -32,6 +32,18 @@ PAD_CHANNEL = 3         # warm sustain pad
 CHOIR_CHANNEL = 4       # dark choir layer (Yngwie territory)
 DRONE_CHANNEL = 5       # Taurus-style synth bass drone
 
+# ── Soundfont routing ─────────────────────────────────────────────
+# DEFAULT_SOUNDFONT is the workhorse SF2 — used for any instrument
+# that doesn't have an explicit override in INSTRUMENT_SOURCES.
+# INSTRUMENT_SOURCES maps a GM-instrument-name (as used in STYLE_PRESETS
+# and GM_PROGRAMS) to the name of the soundfont that should play it.
+# Names here must match the names passed to audio.load_soundfont(name, ...)
+# in the bootstrap code (e.g. test_playback.py, app.py).
+#
+# Empty for now: every instrument resolves to DEFAULT_SOUNDFONT until
+# we hear what's actually weak and fill in targeted overrides.
+DEFAULT_SOUNDFONT = "compifont"
+INSTRUMENT_SOURCES: dict[str, str] = {}
 
 # ── Style presets ─────────────────────────────────────────────────
 # Each preset assigns GM instrument names to the five layers.
@@ -253,17 +265,26 @@ class PlaybackEngine:
             "drone":  _resolve(drone_instrument,  "drone_instrument"),
         }
 
-        # Apply instruments to channels
+        # Apply instruments to channels, routing each to its source soundfont.
+        # INSTRUMENT_SOURCES lookup falls back to DEFAULT_SOUNDFONT.
+        def _sf_for(instrument_name: str) -> str:
+            return INSTRUMENT_SOURCES.get(instrument_name, DEFAULT_SOUNDFONT)
+
         if instruments["chord"]:
-            self.audio.set_instrument_by_name(CHORD_CHANNEL, instruments["chord"])
+            self.audio.set_instrument_by_name(CHORD_CHANNEL, instruments["chord"],
+                                              _sf_for(instruments["chord"]))
         if instruments["bass"]:
-            self.audio.set_instrument_by_name(BASS_CHANNEL, instruments["bass"])
+            self.audio.set_instrument_by_name(BASS_CHANNEL, instruments["bass"],
+                                              _sf_for(instruments["bass"]))
         if instruments["pad"]:
-            self.audio.set_instrument_by_name(PAD_CHANNEL, instruments["pad"])
+            self.audio.set_instrument_by_name(PAD_CHANNEL, instruments["pad"],
+                                              _sf_for(instruments["pad"]))
         if instruments["choir"]:
-            self.audio.set_instrument_by_name(CHOIR_CHANNEL, instruments["choir"])
+            self.audio.set_instrument_by_name(CHOIR_CHANNEL, instruments["choir"],
+                                              _sf_for(instruments["choir"]))
         if instruments["drone"]:
-            self.audio.set_instrument_by_name(DRONE_CHANNEL, instruments["drone"])
+            self.audio.set_instrument_by_name(DRONE_CHANNEL, instruments["drone"],
+                                              _sf_for(instruments["drone"]))
 
         # Set per-layer volume (lower for pad/choir to sit underneath)
         self.audio.set_volume(CHORD_CHANNEL, 110)
