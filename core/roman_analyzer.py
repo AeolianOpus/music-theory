@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 from .music_theory import Chord, ChordProgression, note_name
-from .key_analyzer import KeyAnalysis
+from .key_analyzer import KeyAnalysis, KeySection
 
 
 @dataclass
@@ -140,41 +140,95 @@ def analyze_roman(progression: ChordProgression,
                   key_analysis: KeyAnalysis) -> list[RomanLabel]:
     """
     Label each chord in the progression with its Roman numeral function.
-    
+
+    When key_analysis.sections contains multiple sections (the progression
+    modulates), each chord is labeled relative to ITS section's key.
+    For single-section input the behavior is identical to the original
+    single-key analyzer.
+
     Args:
         progression: the chord progression to analyze
-        key_analysis: the output of key_analyzer.analyze_key()
-    
+        key_analysis: the output of key_analyzer.analyze_key() or
+                      modulation_detector.analyze_key_sections()
+
     Returns:
         A list of RomanLabel, one per chord, in progression order.
     """
     if not progression.chords or key_analysis is None:
         return []
-    
+
+    # Multi-section path: iterate sections, label each per its own key.
+    # Single-section input falls through to this path too — it just runs
+    # the loop body once, producing identical output to the original code.
+    if key_analysis.sections and len(key_analysis.sections) > 1:
+        return _analyze_roman_multi_section(progression, key_analysis)
+
+    return _analyze_roman_single_key(progression, key_analysis)
+
+
+def _analyze_roman_single_key(progression: ChordProgression,
+                              key_analysis: KeyAnalysis) -> list[RomanLabel]:
+    """Single-key Roman analysis. Original behavior, refactored into a
+    helper so the multi-section path can reuse it per-section."""
     tonic_pc = key_analysis.tonic_pc
     mode_name = key_analysis.mode_name
     is_hm_v_system = key_analysis.scale_system == "harmonic_minor_V"
-    
+
     # Look up the diatonic table for this mode.
     table = MODE_TABLES.get(mode_name, _MAJOR)
-    
+
     # Parent scale pitch classes (for diatonic-chord-root detection).
     # The first scale in parent_scales is always the primary mode.
     parent_scale = key_analysis.parent_scales[0]
-    
+
     # Build a map: scale_degree_pc -> (degree_index, expected_quality, numeral_text)
     degree_info: dict[int, tuple[int, str, str]] = {}
     for degree_idx, (expected_quality, numeral_text) in enumerate(table):
         degree_pc = parent_scale.pitch_classes[degree_idx]
         degree_info[degree_pc] = (degree_idx, expected_quality, numeral_text)
-    
+
     labels: list[RomanLabel] = []
     for chord in progression.chords:
         labels.append(_label_one_chord(
             chord, tonic_pc, degree_info, is_hm_v_system, key_analysis,
         ))
-    
+
     return labels
+
+
+def _analyze_roman_multi_section(progression: ChordProgression,
+                                 key_analysis: KeyAnalysis) -> list[RomanLabel]:
+    """Per-section Roman analysis for modulating progressions.
+    For each KeySection, build a single-section synthetic KeyAnalysis,
+    slice the progression to the section's chord range, and run the
+    single-key analyzer on that slice. Concatenate the per-section
+    label lists in progression order.
+    """
+    # Local import to avoid a circular import at module load time
+    # (modulation_detector imports from key_analyzer; we import the
+    # helper from modulation_detector here only when actually needed).
+    from .modulation_detector import slice_progression_to_section, build_section_analysis
+
+    all_labels: list[RomanLabel] = []
+    for section in key_analysis.sections:
+        section_prog = slice_progression_to_section(progression, section)
+        section_analysis = build_section_analysis(progression, section)
+        if section_analysis is None:
+            # Fallback: produce "?" labels for this section's chords
+            for chord in section_prog.chords:
+                all_labels.append(RomanLabel(
+                    chord=chord,
+                    numeral="?",
+                    function="unknown",
+                    source="unknown",
+                    scale_degree=None,
+                    tooltip=f"{chord.display_name} — section analysis failed",
+                ))
+            continue
+        section_labels = _analyze_roman_single_key(section_prog, section_analysis)
+        all_labels.extend(section_labels)
+
+    return all_labels
 
 
 def _label_one_chord(chord: Chord,

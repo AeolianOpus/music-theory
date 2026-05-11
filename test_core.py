@@ -142,6 +142,35 @@ for syms, label, expected in roman_cases:
     print(f"    {' - '.join(syms):35s} → {' '.join(got)}")
     if got != expected:
         print(f"    expected:                            {' '.join(expected)}")
+
+# ── Multi-section Roman analysis (B1 integration) ──
+# These cases use analyze_key_sections() to get a modulation-aware KeyAnalysis,
+# then verify analyze_roman() labels each chord relative to ITS section's key.
+print("\n  Multi-section (modulating progressions):")
+multi_section_roman_cases = [
+    (['C', 'G', 'Am', 'F', 'Bb', 'F', 'Gm', 'Bb'],
+        'C major → Bb major',
+        ['I', 'V', 'vi', 'IV', 'I', 'V', 'vi', 'I']),
+    (['Am', 'Dm', 'E7', 'Am', 'C', 'G', 'Am', 'F'],
+        'A minor → C major (relative)',
+        ['i', 'iv', 'V7 (HM)', 'i', 'I', 'V', 'vi', 'IV']),
+    (['Em', 'Am', 'B7', 'Em', 'G', 'D', 'G', 'C'],
+        'E minor → G major (relative)',
+        ['i', 'iv', 'V7 (HM)', 'i', 'I', 'V', 'I', 'IV']),
+]
+for syms, label, expected in multi_section_roman_cases:
+    prog = ChordProgression.parse(syms)
+    ka = analyze_key_sections(prog)
+    if ka is None:
+        print(f"  ✗ {label}: section analysis failed")
+        continue
+    labels = analyze_roman(prog, ka)
+    got = [L.numeral for L in labels]
+    match = "✓" if got == expected else "✗"
+    print(f"  {match} {label}")
+    print(f"    {' - '.join(syms):35s} → {' '.join(got)}")
+    if got != expected:
+        print(f"    expected:                            {' '.join(expected)}")
         
 # ── Chord-Scale Coach (Stage 3) ──
 separator("Chord-Scale Coach")
@@ -169,6 +198,37 @@ for syms, label in coach_cases:
     print(f"\n  {label}: {' - '.join(syms)}")
     print(f"    Key: {ka.display}")
     for adv, label_obj in zip(advice, rl):
+        print(f"    {adv.chord.display_name} ({label_obj.numeral}):")
+        for opt in adv.options:
+            tags = ','.join(opt.idioms)
+            print(f"      [{opt.priority}] {opt.scale.display_name:30s}  "
+                  f"— {opt.reason}  ({tags})")
+
+# ── Multi-section chord-scale coach (B1 integration) ──
+print("\n  Multi-section (modulating progressions):")
+multi_section_coach_cases = [
+    (['Am', 'Dm', 'E7', 'Am', 'C', 'G', 'Am', 'F'],
+        'A minor → C major (relative)'),
+    (['C', 'G', 'Am', 'F', 'Bb', 'F', 'Gm', 'Bb'],
+        'C major → Bb major'),
+]
+for syms, label in multi_section_coach_cases:
+    prog = ChordProgression.parse(syms)
+    ka = analyze_key_sections(prog)
+    if ka is None:
+        print(f"  ✗ {label}: section analysis failed")
+        continue
+    rl = analyze_roman(prog, ka)
+    advice = analyze_chord_scales(prog, ka, rl)
+    print(f"\n  {label}: {' - '.join(syms)}")
+    print(f"    Key: {ka.display}")
+    # Print a section divider header to make boundaries visible
+    section_boundaries = {s.start_index: s for s in ka.sections}
+    for i, (adv, label_obj) in enumerate(zip(advice, rl)):
+        if i in section_boundaries:
+            s = section_boundaries[i]
+            print(f"    --- bars {s.start_index + 1}-{s.end_index + 1}: "
+                  f"{s.tonic_name} {s.mode_label} ---")
         print(f"    {adv.chord.display_name} ({label_obj.numeral}):")
         for opt in adv.options:
             tags = ','.join(opt.idioms)
