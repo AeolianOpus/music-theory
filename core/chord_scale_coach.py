@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 from .music_theory import Chord, ChordProgression, note_name
 from .scales import Scale
-from .key_analyzer import KeyAnalysis
+from .key_analyzer import KeyAnalysis, KeySection
 from .roman_analyzer import RomanLabel
 
 
@@ -565,10 +565,17 @@ def analyze_chord_scales(
     """
     Produce per-chord scale advice for the whole progression.
 
+    When key_analysis.sections contains multiple sections (the progression
+    modulates), each chord's scale advice is built using ITS section's key
+    context. For single-section input the behavior is identical to the
+    original single-key analyzer.
+
     Args:
         progression: chord progression to analyze.
-        key_analysis: output of analyze_key(). May be None for empty progressions.
-        roman_labels: output of analyze_roman(); must be same length as progression.chords.
+        key_analysis: output of analyze_key() or analyze_key_sections().
+            May be None for empty progressions.
+        roman_labels: output of analyze_roman(); must be same length as
+            progression.chords.
         max_options: cap on options per chord (default 5).
 
     Returns:
@@ -582,6 +589,27 @@ def analyze_chord_scales(
             f"progression.chords length ({len(progression.chords)})"
         )
 
+    # Multi-section path: iterate sections, call single-key analyzer per
+    # section with section-sliced inputs, concatenate. Single-section input
+    # falls through to _analyze_chord_scales_single_key().
+    if key_analysis.sections and len(key_analysis.sections) > 1:
+        return _analyze_chord_scales_multi_section(
+            progression, key_analysis, roman_labels, max_options,
+        )
+
+    return _analyze_chord_scales_single_key(
+        progression, key_analysis, roman_labels, max_options,
+    )
+
+
+def _analyze_chord_scales_single_key(
+    progression: ChordProgression,
+    key_analysis: KeyAnalysis,
+    roman_labels: list[RomanLabel],
+    max_options: int,
+) -> list[ChordScaleAdvice]:
+    """Single-key scale advice. Original behavior, refactored into a helper
+    so the multi-section path can reuse it per-section."""
     # If the whole progression is dominant-7's (blues context), add the blues
     # scale to every chord. Detected via Stage 1's all-dominants implicit check:
     # when the key system is "chromatic" AND every chord is dominant-quality,
@@ -622,3 +650,39 @@ def analyze_chord_scales(
         advice_list.append(ChordScaleAdvice(chord=chord, options=opts))
 
     return advice_list
+
+
+def _analyze_chord_scales_multi_section(
+    progression: ChordProgression,
+    key_analysis: KeyAnalysis,
+    roman_labels: list[RomanLabel],
+    max_options: int,
+) -> list[ChordScaleAdvice]:
+    """Per-section scale advice for modulating progressions.
+
+    For each KeySection: slice the progression and roman_labels to the
+    section's chord range, build a single-section synthetic KeyAnalysis,
+    call _analyze_chord_scales_single_key() on the slice. Concatenate
+    the per-section advice lists in progression order.
+    """
+    # Local import to avoid a circular import at module load time
+    # (modulation_detector imports from key_analyzer; we import the
+    # helpers from modulation_detector here only when actually needed).
+    from .modulation_detector import slice_progression_to_section, build_section_analysis
+
+    all_advice: list[ChordScaleAdvice] = []
+    for section in key_analysis.sections:
+        section_prog = slice_progression_to_section(progression, section)
+        section_analysis = build_section_analysis(progression, section)
+        section_labels = roman_labels[section.start_index:section.end_index + 1]
+        if section_analysis is None:
+            # Fallback: produce empty-options advice for this section's chords
+            for chord in section_prog.chords:
+                all_advice.append(ChordScaleAdvice(chord=chord, options=[]))
+            continue
+        section_advice = _analyze_chord_scales_single_key(
+            section_prog, section_analysis, section_labels, max_options,
+        )
+        all_advice.extend(section_advice)
+
+    return all_advice

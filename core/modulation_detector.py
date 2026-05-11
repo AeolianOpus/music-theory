@@ -28,6 +28,7 @@ from typing import Optional
 from .music_theory import ChordProgression
 from .scales import Scale
 from .key_analyzer import KeyAnalysis, KeySection, analyze_key
+from .scales import Scale  # already imported above; this line is redundant—skip if present
 
 
 WINDOW_SIZE = 3
@@ -384,6 +385,32 @@ def _apply_relative_splits(
     return result
 
 # ── Public API ────────────────────────────────────────────────────
+
+
+def slice_progression_to_section(
+    progression: ChordProgression,
+    section: KeySection,
+) -> ChordProgression:
+    """Extract the chord slice corresponding to one KeySection.
+    Returns a new ChordProgression containing only that section's chords."""
+    return _slice_progression(progression, section.start_index, section.end_index + 1)
+
+
+def build_section_analysis(
+    progression: ChordProgression,
+    section: KeySection,
+) -> Optional[KeyAnalysis]:
+    """Build a single-section KeyAnalysis suitable for passing to
+    analyze_roman() or analyze_chord_scales() for one section of a
+    modulating progression.
+
+    Runs analyze_key() on the section's chord slice to produce a fresh
+    KeyAnalysis whose tonic/mode/parent_scales/scale_system match the
+    section. Used by section-aware wrappers in the downstream analyzers.
+    """
+    section_prog = slice_progression_to_section(progression, section)
+    return analyze_key(section_prog)
+
 
 def analyze_key_sections(progression: ChordProgression) -> Optional[KeyAnalysis]:
     """Multi-key analysis of a chord progression.
