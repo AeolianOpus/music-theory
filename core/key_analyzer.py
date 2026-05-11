@@ -41,6 +41,22 @@ MODE_LABELS = {
     "Hungarian Minor": "Hungarian minor",
 }
 
+@dataclass
+class KeySection:
+    """A single section of a progression that stays in one key.
+    For non-modulating progressions, a KeyAnalysis has exactly one of these
+    spanning the entire progression. For modulating progressions, the
+    multi-key analyzer produces multiple consecutive sections.
+    """
+    start_index: int                       # first chord index in this section (inclusive)
+    end_index: int                         # last chord index in this section (inclusive)
+    tonic_pc: int                          # pitch class of section's tonic (0-11)
+    tonic_name: str                        # "F#", "A", etc.
+    mode_name: str                         # "Aeolian (Natural Minor)", etc.
+    mode_label: str                        # friendly label like "minor"
+    scale_system: str                      # "pure", "harmonic_minor_V", "chromatic"
+    confidence: float                      # 0.0-1.0
+
 
 @dataclass
 class KeyAnalysis:
@@ -54,6 +70,7 @@ class KeyAnalysis:
     confidence: float                      # 0.0-1.0
     display: str                           # e.g. "F# minor (harmonic minor V)"
     notes: list[str] = field(default_factory=list)  # human-readable explanations
+    sections: list[KeySection] = field(default_factory=list)  # per-section breakdown
 
 
 def _find_tonic(progression: ChordProgression) -> Optional[tuple[int, str]]:
@@ -347,6 +364,20 @@ def analyze_key(progression: ChordProgression) -> Optional[KeyAnalysis]:
         display = f"{tonic_name} {mode_label} — chromatic/modulating"
         scale_system = "chromatic"
     
+    # Single-key analysis produces a single section spanning the whole progression.
+    # The multi-key analyzer in modulation_detector.py populates this with multiple
+    # sections when modulations are detected.
+    single_section = KeySection(
+        start_index=0,
+        end_index=len(progression.chords) - 1,
+        tonic_pc=tonic_pc,
+        tonic_name=tonic_name,
+        mode_name=best_mode_name,
+        mode_label=mode_label,
+        scale_system=scale_system,
+        confidence=confidence,
+    )
+
     return KeyAnalysis(
         tonic_pc=tonic_pc,
         tonic_name=tonic_name,
@@ -357,4 +388,5 @@ def analyze_key(progression: ChordProgression) -> Optional[KeyAnalysis]:
         confidence=confidence,
         display=display,
         notes=notes,
+        sections=[single_section],
     )
