@@ -2,6 +2,12 @@
 Manual playback test. Run from project root: python test_playback.py
 Plays a few progressions across different style presets.
 Press Ctrl+C to stop early.
+
+Loads multiple soundfonts so playback.py can route specific instruments to
+specific SF2s via INSTRUMENT_SOURCES. With INSTRUMENT_SOURCES empty (default),
+every instrument resolves to DEFAULT_SOUNDFONT (compifont) — this run is the
+"all routed through compifont" baseline. Fill in INSTRUMENT_SOURCES later
+once you've heard what's weak.
 """
 import time
 from core.music_theory import ChordProgression
@@ -9,14 +15,43 @@ from core.audio_engine import AudioEngine
 from core.playback import PlaybackEngine
 
 
-SOUNDFONT_PATH = "soundfonts/FluidR3_GM.sf2"  # adjust to your actual SF2 file
+# Map of soundfont-name → filesystem path. The name on the LEFT is what
+# playback.py's INSTRUMENT_SOURCES will reference. The path on the RIGHT
+# is what's actually on disk. DEFAULT_SOUNDFONT in playback.py must be one
+# of these names ("compifont" by default).
+SOUNDFONTS: dict[str, str] = {
+    "compifont":      "soundfonts/Compifont.sf2",
+    "musyng":         "soundfonts/Musyng_Kite.sf2",
+    "tyroland":       "soundfonts/TyrolandGS27fixed.sf2",
+    "timbres":        "soundfonts/Timbres_of_Heaven_(XGM)_4.00(G).sf2",
+    "hq_orch":        "soundfonts/HQ_Orchestral_Soundfont_Collection.sf2",
+    "fluidr3":        "soundfonts/FluidR3_GM_GS.sf2",
+    "musescore":      "soundfonts/MuseScore_General.sf2",
+    "guitar_metal":   "soundfonts/Guitar_for_Metal_GM.sf2",
+    "drums_hardrock": "soundfonts/Drums_HardRockDrumsV3.sf2",
+}
+
+# Which soundfont is loaded first (registered as the engine's default).
+# Must match playback.DEFAULT_SOUNDFONT or sounds won't route correctly.
+PRIMARY_SF = "compifont"
 
 
 def main():
     audio = AudioEngine()
-    if not audio.initialize(SOUNDFONT_PATH):
-        print("Audio failed to initialize. Check SoundFont path.")
+
+    primary_path = SOUNDFONTS[PRIMARY_SF]
+    if not audio.initialize(primary_path, soundfont_name=PRIMARY_SF):
+        print(f"Audio failed to initialize with '{PRIMARY_SF}' at {primary_path}.")
         return
+    print(f"Loaded primary soundfont: {PRIMARY_SF} ({primary_path})")
+
+    # Load all the others. load_soundfont() prints its own warnings on miss/failure;
+    # missing files are non-fatal — playback just falls back to the primary.
+    for name, path in SOUNDFONTS.items():
+        if name == PRIMARY_SF:
+            continue
+        if audio.load_soundfont(name, path):
+            print(f"Loaded soundfont: {name} ({path})")
 
     playback = PlaybackEngine(audio)
 
