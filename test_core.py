@@ -9,6 +9,7 @@ from core.scale_matcher import suggest_scales, analyze_chord_in_scale
 from core.tuning import Tuning, get_all_tuning_presets
 from core.key_analyzer import analyze_key
 from core.roman_analyzer import analyze_roman
+from core.modulation_detector import analyze_key_sections
 
 def separator(title: str):
     print(f"\n{'='*60}")
@@ -173,6 +174,66 @@ for syms, label in coach_cases:
             tags = ','.join(opt.idioms)
             print(f"      [{opt.priority}] {opt.scale.display_name:30s}  "
                   f"— {opt.reason}  ({tags})")
+
+# ── Modulation Detector (B1) ──
+separator("Modulation Detector")
+
+modulation_cases = [
+    # (chord_symbols, description, expected_num_sections, expected_primary_label)
+    # ── No modulation cases (should produce single section) ──
+    (['Am', 'Dm', 'E7', 'Am'],
+        'No modulation — A minor stays A minor', 1, 'A minor'),
+    (['C', 'G', 'Am', 'F'],
+        'No modulation — C major pop progression', 1, 'C major'),
+    (['Dm', 'G', 'Dm', 'C'],
+        'No modulation — D Dorian', 1, 'D Dorian'),
+    (['C', 'F', 'Bb', 'C'],
+        'Brief bVII borrow does NOT trigger modulation', 1, 'C major'),
+    # ── Real modulation cases ──
+    (['C', 'G', 'Am', 'F', 'Bb', 'F', 'Gm', 'Bb'],
+        'Classic modulation C major → Bb major', 2, 'C major'),
+    (['Am', 'Dm', 'E7', 'Am', 'C', 'G', 'Am', 'F'],
+        'Modulation to relative major Am → C major', 2, 'A minor'),
+    (['Em', 'Am', 'B7', 'Em', 'G', 'D', 'G', 'C'],
+        'Modulation Em → G major (relative)', 2, 'E minor'),
+    # ── Extreme / chromatic ──
+    (['C', 'Eb', 'F', 'Bb'],
+        'Multiple borrowings (could be C major OR Bb major)', None, None),
+    # ── False-positive guards (must NOT split) ──
+    (['C', 'Am', 'F', 'G', 'C', 'Am', 'F', 'G'],
+        'I-vi-IV-V vamp — must NOT split into C major + A minor', 1, 'C major'),
+    (['Am', 'C', 'Am', 'C', 'Am', 'C'],
+        'Am-C oscillation — must NOT split', 1, 'A minor'),
+]
+for entry in modulation_cases:
+    syms, label, expected_n_sections, expected_primary = entry
+    prog = ChordProgression.parse(syms)
+    result = analyze_key_sections(prog)
+    if result is None:
+        print(f"  ✗ {label}: analysis returned None")
+        continue
+    n_sections = len(result.sections)
+    primary_label = f"{result.tonic_name} {result.mode_label}"
+
+    # Check expectations if provided
+    section_match = "?" if expected_n_sections is None else (
+        "✓" if n_sections == expected_n_sections else "✗"
+    )
+    primary_match = "?" if expected_primary is None else (
+        "✓" if primary_label == expected_primary else "✗"
+    )
+
+    prog_str = ' - '.join(syms)
+    if len(prog_str) > 40:
+        prog_str = prog_str[:37] + '...'
+    print(f"  {prog_str:42s} → {result.display}")
+    print(f"    ({label})")
+    print(f"    sections={n_sections} {section_match}  "
+          f"primary={primary_label} {primary_match}")
+    for s in result.sections:
+        print(f"      bars {s.start_index + 1}-{s.end_index + 1}: "
+              f"{s.tonic_name} {s.mode_label} "
+              f"({s.scale_system}, conf={s.confidence:.2f})")
 
 print(f"\n{'='*60}")
 print(f"  All core tests passed ✓")
