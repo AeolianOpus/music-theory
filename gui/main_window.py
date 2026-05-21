@@ -5,6 +5,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from core.audio_engine import AudioEngine
 from gui.chord_builder import ChordBuilder
+from gui.saved_progressions import SavedProgressionsTab
 
 
 class MainWindow(QMainWindow):
@@ -68,9 +69,14 @@ class MainWindow(QMainWindow):
             "Shift by half steps, choose from presets, or build your own."),
             "🔧 Tuning")
 
-        self.tabs.addTab(self._placeholder("Saved Progressions",
-            "View and manage saved chord progressions and scale choices."),
-            "💾 Saved")
+        # Saved Progressions tab — library of saved chord progressions.
+        # Click Load on any entry to push the progression into the
+        # chord_builder and switch back to the Scale Finder tab.
+        self.saved_tab = SavedProgressionsTab()
+        self.saved_tab.load_progression_requested.connect(
+            self._on_load_progression_from_library
+        )
+        self.tabs.addTab(self.saved_tab, "💾 Saved")
 
         layout.addWidget(self.tabs)
 
@@ -208,6 +214,14 @@ class MainWindow(QMainWindow):
             font-weight: bold;
         }
     """)
+
+    def _on_load_progression_from_library(self, filepath: str) -> None:
+        """Called when the user clicks Load on an entry in the Saved tab.
+        Pushes the progression into the chord_builder and switches to
+        the Scale Finder tab so the user can see the result."""
+        if self.chord_builder.load_progression_from_file(filepath):
+            # Switch focus to the Scale Finder tab
+            self.tabs.setCurrentWidget(self.chord_builder)
 
     def closeEvent(self, event):
         """Clean up on window close."""
