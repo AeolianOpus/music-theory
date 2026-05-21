@@ -1,15 +1,22 @@
-from unicodedata import category
-
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QPushButton, QListWidget, QListWidgetItem,
-    QVBoxLayout, QGroupBox, QListView, QAbstractItemView,
+    QVBoxLayout, QGroupBox, QListView, QAbstractItemView, QTabWidget,
+    QScrollArea, QFrame, QSizePolicy,
 )
-from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtCore import Qt, Signal, QSize, QSettings, QStandardPaths
+from PySide6.QtWidgets import QFileDialog, QInputDialog, QMessageBox
+import json
+import os
+from datetime import datetime
 
 from core.audio_engine import AudioEngine, PIANO_CHANNEL
 from core.music_theory import QUALITY_FULL_NAMES, Chord, ChordProgression, SHARP_NAMES, GUITAR_NAMES, CHORD_FORMULAS, QUALITY_DISPLAY, QUALITY_FULL_NAMES, note_name
 from core.scale_matcher import suggest_scales, detect_key
 from core.key_analyzer import analyze_key
+from core.modulation_detector import analyze_key_sections
+from core.roman_analyzer import analyze_roman
+from core.chord_scale_coach import analyze_chord_scales
+from gui.saved_library import register_save
 
 # Chord quality categories for button layout
 QUALITY_CATEGORIES = {
@@ -28,6 +35,124 @@ RHYTHM_PATTERNS = {
     "Shuffle": [1.33, 0.67],  # Long-short swing feel
     "Blues (12-bar feel)": [2.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],  # Typical blues timing
 }
+
+
+# ── Per-chord display helpers (used by Per Chord tab) ────────────────
+
+# Priority marker glyphs. Per Constantine's spec:
+#   priority 0 (primary)   → ◇ diamond
+#   priority 1 (secondary) → ● filled circle
+#   priority 2 (color/outside) → ○ open circle
+PRIORITY_MARKERS = {0: "◇", 1: "●", 2: "○"}
+
+# Idiom tag colors. Each idiom gets a distinct Catppuccin Mocha color
+# so the user can scan a chord section and identify the style of each
+# scale suggestion at a glance.
+IDIOM_COLORS = {
+    "universal":    "#6c7086",  # muted gray — works in any context
+    "rock_blues":   "#f38ba8",  # red — energy
+    "jazz":         "#cba6f7",  # purple — sophistication
+    "neoclassical": "#f9e2af",  # gold — Yngwie territory
+    "fusion":       "#94e2d5",  # teal — modern hybrid
+}
+
+# How many options to show in each chord section before the
+# "+ N more suggestions" link collapses the rest.
+DEFAULT_OPTIONS_VISIBLE = 3
+
+# All available idiom tags, in the order they appear in the filter row.
+ALL_IDIOMS = ["universal", "rock_blues", "jazz", "neoclassical", "fusion"]
+
+
+def _format_scale_notes(scale) -> str:
+    """Render a scale's notes as a space-separated string.
+    e.g., 'A B C D E F G#' for A harmonic minor."""
+    from core.music_theory import note_name
+    return " ".join(note_name(pc) for pc in scale.pitch_classes)
+
+
+def _format_scale_formula(scale) -> str:
+    """Render a scale's interval formula as scale degrees.
+    e.g., '1 2 b3 4 5 b6 7' for harmonic minor.
+
+    Reads scale.intervals (semitones from root) and maps each to its
+    degree label, using major scale as the reference (1 2 3 4 5 6 7 = 0 2 4 5 7 9 11)."""
+    # Degree labels indexed by semitone distance from root.
+    # Returns the most common name for each interval.
+    semitone_to_degree = {
+        0:  "1",
+        1:  "b2",
+        2:  "2",
+        3:  "b3",
+        4:  "3",
+        5:  "4",
+        6:  "b5",
+        7:  "5",
+        8:  "b6",
+        9:  "6",
+        10: "b7",
+        11: "7",
+    }
+    parts = []
+    for semi in scale.intervals:
+        # Wrap into 0-11 for any extended intervals (9ths, 11ths, etc.)
+        # Compound intervals like the 9th (14 semitones) display as "9"
+        # rather than "2" — handle that explicitly.
+        compound = {
+            13: "b9", 14: "9", 15: "#9",
+            17: "11", 18: "#11",
+            20: "b13", 21: "13",
+        }
+        if semi in compound:
+            parts.append(compound[semi])
+        else:
+            parts.append(semitone_to_degree.get(semi % 12, "?"))
+    return " ".join(parts)
+
+
+def _format_chord_coverage(scale, chord) -> str:
+    """Render how the scale's notes relate to the chord's notes.
+
+    Returns a human-readable string like:
+        "Covers all 3 chord tones: A (1), C (b3), E (5)"
+    or, if some chord tones are missing from the scale:
+        "Covers 2 of 3 chord tones: A (1), E (5). Missing: C"
+
+    The chord-tone pitch classes are checked for membership in the
+    scale's pitch class set; degree labels are computed relative to the
+    chord root, not the scale root."""
+    from core.music_theory import note_name
+
+    scale_pcs = set(scale.pitch_classes)
+    chord_pcs = list(chord.pitch_class_set)  # ordered by interval from root
+
+    semitone_to_degree = {
+        0: "1", 1: "b2", 2: "2", 3: "b3", 4: "3", 5: "4",
+        6: "b5", 7: "5", 8: "b6", 9: "6", 10: "b7", 11: "7",
+    }
+
+    covered_parts: list[str] = []
+    missing_parts: list[str] = []
+    for chord_pc in chord_pcs:
+        interval_from_root = (chord_pc - chord.root) % 12
+        degree = semitone_to_degree.get(interval_from_root, "?")
+        label = f"{note_name(chord_pc)} ({degree})"
+        if chord_pc in scale_pcs:
+            covered_parts.append(label)
+        else:
+            missing_parts.append(note_name(chord_pc))
+
+    total = len(chord_pcs)
+    covered = len(covered_parts)
+
+    if covered == total:
+        return f"Covers all {total} chord tones: {', '.join(covered_parts)}"
+    if covered == 0:
+        return f"No chord tones covered (chord tones: {', '.join(missing_parts)})"
+    return (
+        f"Covers {covered} of {total} chord tones: "
+        f"{', '.join(covered_parts)}. Missing: {', '.join(missing_parts)}"
+    )
 
 class ChordChip(QWidget):
     """A single chord chip: name + × button, draggable via the parent list."""
@@ -79,6 +204,246 @@ class ChordChip(QWidget):
             }
         """)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
+        
+class _IdiomPill(QLabel):
+    """A single idiom tag rendered as a colored pill. Used inside
+    _ScaleOptionRow to display one of the scale's idiom tags."""
+
+    def __init__(self, idiom: str, parent: QWidget | None = None):
+        super().__init__(idiom.replace("_", " "), parent)
+        color = IDIOM_COLORS.get(idiom, "#6c7086")
+        # Background uses the color at low alpha for fill, text uses
+        # the full color for contrast.
+        self.setStyleSheet(f"""
+            QLabel {{
+                color: {color};
+                background-color: rgba(180, 190, 254, 20);
+                border: 1px solid {color};
+                border-radius: 8px;
+                padding: 2px 8px;
+                font-size: 9pt;
+                font-weight: bold;
+            }}
+        """)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+
+class _ScaleOptionRow(QFrame):
+    """A single scale suggestion within a chord section.
+
+    Default view: priority marker + scale name + reason + idiom pills.
+    Click anywhere on the row header to expand and reveal notes,
+    formula, and chord-tone coverage for this scale against the chord."""
+
+    def __init__(
+        self,
+        option,
+        chord,
+        parent: QWidget | None = None,
+    ):
+        """option: ChordScaleOption from core.chord_scale_coach
+        chord:  the Chord this option is being suggested for
+                (needed for chord-tone coverage)"""
+        super().__init__(parent)
+        self.option = option
+        self.chord = chord
+        self.expanded = False
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setStyleSheet("""
+            _ScaleOptionRow {
+                background-color: transparent;
+                border: none;
+                border-radius: 4px;
+            }
+            _ScaleOptionRow:hover {
+                background-color: rgba(180, 190, 254, 15);
+            }
+        """)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # ── Header row (always visible) ──
+        self._header_widget = QWidget()
+        header = QHBoxLayout(self._header_widget)
+        header.setContentsMargins(8, 4, 8, 4)
+        header.setSpacing(8)
+
+        # Priority marker
+        marker_text = PRIORITY_MARKERS.get(option.priority, "·")
+        marker_color = {
+            0: "#f9e2af",  # gold — primary
+            1: "#89b4fa",  # blue — secondary
+            2: "#a6adc8",  # gray — color/outside
+        }.get(option.priority, "#a6adc8")
+        marker_label = QLabel(marker_text)
+        marker_label.setStyleSheet(
+            f"color: {marker_color}; font-size: 13pt; "
+            "font-weight: bold; background: transparent;"
+        )
+        marker_label.setFixedWidth(20)
+        marker_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header.addWidget(marker_label)
+
+        # Scale display name (bold)
+        scale_label = QLabel(option.scale.display_name)
+        scale_label.setStyleSheet(
+            "color: #cdd6f4; font-size: 11pt; font-weight: bold; background: transparent;"
+        )
+        scale_label.setMinimumWidth(180)
+        header.addWidget(scale_label)
+
+        # Reason / explanation — muted, takes remaining space.
+        # Strip the leading "<roman> — " prefix from reason since the
+        # Roman numeral is already shown in the section header above.
+        reason_text = option.reason
+        for sep in (" — ", " - "):
+            if sep in reason_text:
+                _, _, rest = reason_text.partition(sep)
+                if rest.strip():
+                    reason_text = rest.strip()
+                    break
+
+        reason_label = QLabel(reason_text)
+        reason_label.setStyleSheet(
+            "color: #a6adc8; font-size: 10pt; background: transparent;"
+        )
+        reason_label.setWordWrap(True)
+        reason_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        header.addWidget(reason_label, 1)
+
+        # Idiom pills
+        pills_widget = QWidget()
+        pills_layout = QHBoxLayout(pills_widget)
+        pills_layout.setContentsMargins(0, 0, 0, 0)
+        pills_layout.setSpacing(4)
+        for idiom in option.idioms:
+            pill = _IdiomPill(idiom)
+            pills_layout.addWidget(pill)
+        header.addWidget(pills_widget)
+
+        outer.addWidget(self._header_widget)
+
+        # ── Details panel (hidden by default) ──
+        self._details_widget = QWidget()
+        details = QVBoxLayout(self._details_widget)
+        details.setContentsMargins(36, 6, 16, 10)  # indented under the scale name
+        details.setSpacing(4)
+
+        notes_str = _format_scale_notes(option.scale)
+        formula_str = _format_scale_formula(option.scale)
+        coverage_str = _format_chord_coverage(option.scale, chord)
+
+        for label_text, value_text in (
+            ("Notes:",    notes_str),
+            ("Formula:",  formula_str),
+            ("Coverage:", coverage_str),
+        ):
+            row = QHBoxLayout()
+            row.setSpacing(8)
+            key_lbl = QLabel(label_text)
+            key_lbl.setStyleSheet(
+                "color: #89b4fa; font-size: 10pt; font-weight: bold; "
+                "background: transparent;"
+            )
+            key_lbl.setFixedWidth(70)
+            row.addWidget(key_lbl)
+
+            val_lbl = QLabel(value_text)
+            val_lbl.setStyleSheet(
+                "color: #cdd6f4; font-size: 10pt; background: transparent;"
+            )
+            val_lbl.setWordWrap(True)
+            val_lbl.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+            )
+            row.addWidget(val_lbl, 1)
+            details.addLayout(row)
+
+        self._details_widget.setVisible(False)
+        outer.addWidget(self._details_widget)
+
+    def mousePressEvent(self, event) -> None:
+        """Click anywhere on the row to toggle the details panel."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.expanded = not self.expanded
+            self._details_widget.setVisible(self.expanded)
+        super().mousePressEvent(event)
+
+
+class _ChordAdviceSection(QFrame):
+    """All scale advice for ONE chord in the progression.
+
+    Header: chord display name (large) above Roman numeral (small subtitle).
+    Body: a vertical stack of _ScaleOptionRow widgets — one per scale option.
+
+    The chord_obj parameter is the underlying Chord object — needed by
+    _ScaleOptionRow for chord-tone coverage calculation in the per-option
+    info expander."""
+
+    def __init__(
+        self,
+        chord_display: str,
+        roman_numeral: str,
+        options: list,
+        chord_obj,
+        parent: QWidget | None = None,
+    ):
+        super().__init__(parent)
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setStyleSheet("""
+            _ChordAdviceSection {
+                background-color: #313244;
+                border: 1px solid #45475a;
+                border-radius: 6px;
+            }
+        """)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(10, 8, 10, 8)
+        outer.setSpacing(6)
+
+        # ── Header: chord name big, Roman numeral as subtitle ──
+        header_widget = QWidget()
+        header_layout = QVBoxLayout(header_widget)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(0)
+
+        chord_label = QLabel(chord_display)
+        chord_label.setStyleSheet(
+            "color: #f5c2e7; font-size: 18pt; font-weight: bold; background: transparent;"
+        )
+        header_layout.addWidget(chord_label)
+
+        roman_label = QLabel(roman_numeral)
+        roman_label.setStyleSheet(
+            "color: #89b4fa; font-size: 11pt; font-style: italic; background: transparent;"
+        )
+        header_layout.addWidget(roman_label)
+
+        outer.addWidget(header_widget)
+
+        # Thin divider between header and options
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setStyleSheet("color: #45475a; background-color: #45475a; max-height: 1px;")
+        outer.addWidget(divider)
+
+        # ── Scale options ──
+        if not options:
+            empty = QLabel("(no scale suggestions available)")
+            empty.setStyleSheet(
+                "color: #6c7086; font-style: italic; padding: 8px;"
+            )
+            outer.addWidget(empty)
+        else:
+            for option in options:
+                row = _ScaleOptionRow(option, chord_obj)
+                outer.addWidget(row)
 
 class ChordBuilder(QWidget):
     # Signal other widgets can listen to (fretboard, piano, etc.)
@@ -124,11 +489,30 @@ class ChordBuilder(QWidget):
 
         self.clear_btn = QPushButton("🗑️ Clear All")
         self.clear_btn.clicked.connect(self._clear_progression)
-        self.clear_btn.setFixedHeight(50)
-        self.clear_btn.setMinimumWidth(120)
+        self.clear_btn.setFixedHeight(45)
+        self.clear_btn.setMinimumWidth(90)
         input_row.addWidget(self.clear_btn)
 
-        input_row.addStretch()  # Separate from playback controls
+        # Resize Add Chord to match Clear All / Play / Arpeggio / Stop sizing
+        self.add_btn.setFixedHeight(45)
+        self.add_btn.setMinimumWidth(100)
+
+        input_row.addStretch()  # Separator before Save/Load group
+
+        # Save + Load buttons
+        self.save_btn = QPushButton("💾 Save")
+        self.save_btn.clicked.connect(self._save_progression)
+        self.save_btn.setFixedHeight(45)
+        self.save_btn.setMinimumWidth(90)
+        input_row.addWidget(self.save_btn)
+
+        self.load_btn = QPushButton("📂 Load")
+        self.load_btn.clicked.connect(self._load_progression)
+        self.load_btn.setFixedHeight(45)
+        self.load_btn.setMinimumWidth(90)
+        input_row.addWidget(self.load_btn)
+
+        input_row.addStretch()  # Separator before playback controls
 
         # Play button
         self.play_btn = QPushButton("▶ Play")
@@ -265,13 +649,60 @@ class ChordBuilder(QWidget):
         progression_controls.addStretch()
         layout.addLayout(progression_controls)
 
-        # ── Results ──
+        # ── Results (tabbed: whole-progression view + per-chord view) ──
         results_group = QGroupBox("Scale Suggestions")
         results_layout = QVBoxLayout(results_group)
 
+        self.results_tabs = QTabWidget()
+        results_layout.addWidget(self.results_tabs)
+
+        # Tab 1: Whole Progression — the original coverage-based scale list.
+        # Answers "what single scale covers the most chord tones across the
+        # whole progression?" Existing behavior, untouched.
+        whole_prog_tab = QWidget()
+        whole_prog_layout = QVBoxLayout(whole_prog_tab)
+        whole_prog_layout.setContentsMargins(4, 4, 4, 4)
         self.results_list = QListWidget()
         self.results_list.itemClicked.connect(self._on_scale_clicked)
-        results_layout.addWidget(self.results_list)
+        whole_prog_layout.addWidget(self.results_list)
+        self.results_tabs.addTab(whole_prog_tab, "Whole Progression")
+
+        # Tab 2: Per Chord — the chord-scale coach view. Answers "for each
+        # chord, what scales should I play while that chord is sounding?"
+        # Per-chord sections with idiom filter, expandable suggestions and
+        # per-option info layer. Built across Pieces 2-3; for now just a
+        # placeholder so the tab structure is visible and clickable.
+        per_chord_tab = QWidget()
+        per_chord_outer_layout = QVBoxLayout(per_chord_tab)
+        per_chord_outer_layout.setContentsMargins(4, 4, 4, 4)
+
+        # Scroll area so long progressions don't blow out the panel height
+        self.per_chord_scroll = QScrollArea()
+        self.per_chord_scroll.setWidgetResizable(True)
+        self.per_chord_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        per_chord_outer_layout.addWidget(self.per_chord_scroll)
+
+        # The container widget INSIDE the scroll area. Piece 2 will populate
+        # self.per_chord_container.layout() with per-chord sections.
+        self.per_chord_container = QWidget()
+        self.per_chord_container_layout = QVBoxLayout(self.per_chord_container)
+        self.per_chord_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.per_chord_container_layout.setSpacing(6)
+
+        # Placeholder visible until Find Matching Scales has been clicked
+        self.per_chord_placeholder = QLabel(
+            "(Build a progression and click 'Find Matching Scales' "
+            "to see per-chord scale advice.)"
+        )
+        self.per_chord_placeholder.setStyleSheet(
+            "color: #6c7086; font-style: italic; padding: 20px;"
+        )
+        self.per_chord_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.per_chord_container_layout.addWidget(self.per_chord_placeholder)
+        self.per_chord_container_layout.addStretch()
+
+        self.per_chord_scroll.setWidget(self.per_chord_container)
+        self.results_tabs.addTab(per_chord_tab, "Per Chord")
 
         layout.addWidget(results_group)
 
@@ -306,8 +737,182 @@ class ChordBuilder(QWidget):
         if self.audio and self.audio.is_ready:
             self.audio.all_notes_off()
         
-        # Stop progression playback
-        self.is_playing_progression = False     
+    # Stop progression playback
+        self.is_playing_progression = False
+
+    # ── Save / Load progression ──────────────────────────────────────
+
+    def _settings(self) -> QSettings:
+        """QSettings handle for app-wide persistent settings (last-used dir etc.)."""
+        return QSettings("MusicTheoryApp", "ScaleFinder")
+
+    def _last_save_dir(self) -> str:
+        """Directory the file dialog opens to. Persists last-used location across
+        sessions. Falls back to user's Documents if no last-used dir is recorded.
+
+        QSettings.value() returns object in Pylance's stubs even with type=str,
+        so we coerce explicitly and validate as a real string before use.
+        """
+        raw = self._settings().value("last_save_dir", "")
+        recorded = raw if isinstance(raw, str) else ""
+        if recorded and os.path.isdir(recorded):
+            return recorded
+        return QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.DocumentsLocation
+        )
+
+    def _remember_save_dir(self, filepath: str) -> None:
+        """Record the directory the user just saved/loaded from."""
+        directory = os.path.dirname(filepath)
+        if directory:
+            self._settings().setValue("last_save_dir", directory)
+
+    def _save_progression(self) -> None:
+        """Save the current progression to a JSON file via Windows file dialog.
+        File contains chord symbols + a user-supplied name + metadata.
+        Records the saved-file path to the library index for the Saved tab."""
+        if not self.progression.chords:
+            QMessageBox.information(
+                self, "Nothing to save",
+                "Build a progression first, then save it.",
+            )
+            return
+
+        # Ask for a friendly name (defaults to progression's chord summary)
+        default_name = " - ".join(c.display_name for c in self.progression.chords[:4])
+        if len(self.progression.chords) > 4:
+            default_name += " ..."
+        name, ok = QInputDialog.getText(
+            self, "Save Progression",
+            "Name this progression:",
+            text=default_name,
+        )
+        if not ok:
+            return
+        name = name.strip() or "Untitled Progression"
+
+        # File dialog — defaults to last-used directory
+        suggested_filename = self._sanitize_filename(name) + ".json"
+        default_path = os.path.join(self._last_save_dir(), suggested_filename)
+        filepath, _ = QFileDialog.getSaveFileName(
+            self, "Save Progression",
+            default_path,
+            "Progression files (*.json);;All files (*)",
+        )
+        if not filepath:
+            return
+        # Ensure .json extension
+        if not filepath.lower().endswith(".json"):
+            filepath += ".json"
+
+        data = {
+            "format": "music-theory-progression-v1",
+            "name": name,
+            "chords": [c.display_name for c in self.progression.chords],
+            "saved_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        try:
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+        except OSError as exc:
+            QMessageBox.critical(
+                self, "Save failed",
+                f"Could not write to {filepath}:\n{exc}",
+            )
+            return
+
+        self._remember_save_dir(filepath)
+        # Register in the library index (Piece 1.5b will define this).
+        self._register_in_library(filepath, name, len(data["chords"]))
+        self.status_message(f"Saved: {name}")
+
+    def _load_progression(self) -> None:
+        """Load a progression from a JSON file via Windows file dialog.
+        Replaces the current progression."""
+        filepath, _ = QFileDialog.getOpenFileName(
+            self, "Load Progression",
+            self._last_save_dir(),
+            "Progression files (*.json);;All files (*)",
+        )
+        if not filepath:
+            return
+        self.load_progression_from_file(filepath)
+
+    def load_progression_from_file(self, filepath: str) -> bool:
+        """Load a progression from a specific file. Public so the Saved tab
+        (Piece 1.5c) can call it directly when the user clicks Load there.
+        Returns True on success."""
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            QMessageBox.critical(
+                self, "Load failed",
+                f"Could not read {filepath}:\n{exc}",
+            )
+            return False
+
+        if not isinstance(data, dict) or "chords" not in data:
+            QMessageBox.critical(
+                self, "Load failed",
+                f"{filepath} is not a valid progression file.",
+            )
+            return False
+
+        chord_symbols = data.get("chords", [])
+        new_chords: list[Chord] = []
+        for sym in chord_symbols:
+            try:
+                new_chords.append(Chord.parse(sym))
+            except (ValueError, KeyError) as exc:
+                QMessageBox.warning(
+                    self, "Load warning",
+                    f"Skipped unrecognized chord '{sym}': {exc}",
+                )
+
+        if not new_chords:
+            QMessageBox.warning(
+                self, "Load warning",
+                "No valid chords found in the file.",
+            )
+            return False
+
+        self.progression = ChordProgression(chords=new_chords)
+        self._update_display()
+        self.results_list.clear()
+        self.progression_changed.emit(self.progression)
+        self._remember_save_dir(filepath)
+        name = data.get("name", os.path.splitext(os.path.basename(filepath))[0])
+        self.status_message(f"Loaded: {name}")
+        # Register in library if it isn't already (e.g., loading a file from
+        # outside the library). Piece 1.5b implements the registration.
+        self._register_in_library(filepath, name, len(new_chords))
+        return True
+
+    def _sanitize_filename(self, name: str) -> str:
+        """Strip characters that would be invalid in a Windows filename."""
+        bad = '<>:"/\\|?*'
+        cleaned = "".join("_" if c in bad else c for c in name).strip()
+        return cleaned or "progression"
+
+    def status_message(self, msg: str) -> None:
+        """Push a short message to the main window status bar.
+        Walks up the parent chain to find the QMainWindow (parent of parent
+        of ... — we don't take a direct reference)."""
+        from PySide6.QtWidgets import QMainWindow
+        widget = self.parent()
+        while widget is not None and not isinstance(widget, QMainWindow):
+            widget = widget.parent()
+        if widget is not None and widget.statusBar() is not None:
+            widget.statusBar().showMessage(msg, 5000)
+
+    def _register_in_library(self, filepath: str, name: str, n_chords: int) -> None:
+        """Add or update an entry in the saved-progressions library index.
+        Index files live one-per-directory alongside the saved files
+        themselves. See gui/saved_library.py for details."""
+        from gui.saved_library import register_save
+        register_save(filepath, name, n_chords)
+
 
     def _add_chord(self) -> None:
         root = GUITAR_NAMES[self.root_group.checkedId()]
@@ -381,16 +986,24 @@ class ChordBuilder(QWidget):
         if not self.progression.chords:
             return
 
+        # Populate the whole-progression tab (existing behavior, unchanged)
+        self._populate_whole_progression_tab()
+
+        # Populate the per-chord tab using analyze_chord_scales()
+        self._populate_per_chord_tab()
+
+    def _populate_whole_progression_tab(self) -> None:
+        """Fill the whole-progression results list using the legacy
+        coverage-based scale matcher. Original Scale Suggestions behavior."""
         self.results_list.clear()
         results = suggest_scales(self.progression, top_n=3, alternatives=5)
 
-        # Store matches for click handling
         self.results_list.addItem("── Top Matches ──")
         for m in results["top"]:
-                miss = f"  (missing: {', '.join(m.missing_note_names())})" if m.missing_notes else "  ✓"
-                item = QListWidgetItem(f"  {m.display_name}   score: {m.score:.0%}{miss}")
-                item.setData(Qt.ItemDataRole.UserRole, m)
-                self.results_list.addItem(item)
+            miss = f"  (missing: {', '.join(m.missing_note_names())})" if m.missing_notes else "  ✓"
+            item = QListWidgetItem(f"  {m.display_name}   score: {m.score:.0%}{miss}")
+            item.setData(Qt.ItemDataRole.UserRole, m)
+            self.results_list.addItem(item)
 
         self.results_list.addItem("")
         self.results_list.addItem("── Alternatives ──")
@@ -399,6 +1012,106 @@ class ChordBuilder(QWidget):
             item = QListWidgetItem(f"  {m.display_name}   score: {m.score:.0%}{miss}")
             item.setData(Qt.ItemDataRole.UserRole, m)
             self.results_list.addItem(item)
+
+    def _populate_per_chord_tab(self) -> None:
+        """Fill the per-chord tab using the chord-scale coach.
+
+        Uses analyze_key_sections() for section-aware key detection so
+        modulating progressions show per-section divider headers. Falls
+        back to analyze_key() if section analysis returns None.
+        """
+        # Clear out the existing container contents (placeholder or prior render)
+        while self.per_chord_container_layout.count() > 0:
+            item = self.per_chord_container_layout.takeAt(0)
+            if item is None:
+                continue
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+
+        # Get key analysis. Try section-aware first; fall back to single-key.
+        ka = analyze_key_sections(self.progression)
+        if ka is None:
+            ka = analyze_key(self.progression)
+        if ka is None:
+            # No key could be determined — show a placeholder
+            msg = QLabel(
+                "(Could not analyze the key for this progression — "
+                "scale advice unavailable.)"
+            )
+            msg.setStyleSheet(
+                "color: #6c7086; font-style: italic; padding: 20px;"
+            )
+            msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.per_chord_container_layout.addWidget(msg)
+            self.per_chord_container_layout.addStretch()
+            return
+
+        # Get Roman labels and per-chord scale advice
+        roman_labels = analyze_roman(self.progression, ka)
+        advice = analyze_chord_scales(self.progression, ka, roman_labels)
+
+        # Build a map of section start indices → section, so we can emit
+        # a section divider header at the right points (multi-section only).
+        section_starts = {}
+        if ka.sections and len(ka.sections) > 1:
+            for section in ka.sections:
+                section_starts[section.start_index] = section
+
+        # Render one section per chord, interleaved with section dividers
+        for i, (chord, rl, adv) in enumerate(zip(
+            self.progression.chords, roman_labels, advice
+        )):
+            # Section divider above this chord, if it's a section boundary
+            if i in section_starts:
+                section = section_starts[i]
+                self._add_section_divider(section)
+
+            chord_section = _ChordAdviceSection(
+                chord_display=chord.display_name,
+                roman_numeral=rl.numeral,
+                options=adv.options,
+                chord_obj=chord,
+            )
+            self.per_chord_container_layout.addWidget(chord_section)
+
+        # Stretch at the bottom so sections pack to the top
+        self.per_chord_container_layout.addStretch()
+
+    def _add_section_divider(self, section) -> None:
+        """Add a visual divider with the section's key label to the
+        per-chord container. Used for modulating progressions."""
+        divider_widget = QWidget()
+        divider_layout = QHBoxLayout(divider_widget)
+        divider_layout.setContentsMargins(0, 12, 0, 4)
+        divider_layout.setSpacing(8)
+
+        # Left hairline
+        left_line = QFrame()
+        left_line.setFrameShape(QFrame.Shape.HLine)
+        left_line.setStyleSheet("color: #45475a; background-color: #45475a; max-height: 1px;")
+        divider_layout.addWidget(left_line, 1)
+
+        # Section label
+        label_text = (
+            f"Bars {section.start_index + 1}–{section.end_index + 1}: "
+            f"{section.tonic_name} {section.mode_label}"
+        )
+        section_label = QLabel(label_text)
+        section_label.setStyleSheet(
+            "color: #89b4fa; font-size: 10pt; font-weight: bold; "
+            "background: transparent; padding: 0 8px;"
+        )
+        divider_layout.addWidget(section_label)
+
+        # Right hairline
+        right_line = QFrame()
+        right_line.setFrameShape(QFrame.Shape.HLine)
+        right_line.setStyleSheet("color: #45475a; background-color: #45475a; max-height: 1px;")
+        divider_layout.addWidget(right_line, 1)
+
+        self.per_chord_container_layout.addWidget(divider_widget)
 
     def _on_scale_clicked(self, item) -> None:
         match = item.data(Qt.ItemDataRole.UserRole)
