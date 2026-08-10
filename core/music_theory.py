@@ -147,18 +147,28 @@ QUALITY_FULL_NAMES: dict[str, str] = {
 
 @dataclass(frozen=True)
 class Chord:
-    """Represents a chord: root pitch class + quality."""
+    """Represents a chord: root pitch class + quality.
+    Optional bass_note for slash chords (e.g. D/F# → bass_note=6)."""
     root: int          # 0-11
     quality: str       # key into CHORD_FORMULAS
+    bass_note: Optional[int] = None  # 0-11 if slash chord, None otherwise
 
     @classmethod
     def parse(cls, symbol: str) -> "Chord":
         """
-        Parse chord symbol like 'Am', 'F#maj7', 'Bbm7b5', 'E7', 'Gsus4'.
+        Parse chord symbol like 'Am', 'F#maj7', 'Bbm7b5', 'E7', 'Gsus4',
+        'D/F#', 'Am7/G'.
         """
         symbol = symbol.strip()
         if not symbol:
             raise ValueError("Empty chord symbol")
+
+        # Split off bass note if slash chord
+        bass_note: Optional[int] = None
+        if "/" in symbol:
+            chord_part, bass_str = symbol.rsplit("/", 1)
+            bass_note = parse_note(bass_str.strip())
+            symbol = chord_part.strip()
 
         # Extract root note (1 or 2 chars)
         if len(symbol) >= 2 and symbol[1] in ('#', 'b'):
@@ -172,13 +182,17 @@ class Chord:
 
         # Determine quality from the remainder
         quality = _parse_quality(rest)
-        return cls(root=root, quality=quality)
+        return cls(root=root, quality=quality, bass_note=bass_note)
 
     @property
     def pitch_classes(self) -> tuple[int, ...]:
-        """Return the pitch classes (0-11) of all chord tones."""
+        """Return the pitch classes (0-11) of all chord tones.
+        Includes bass note for slash chords if not already a chord tone."""
         formula = CHORD_FORMULAS[self.quality]
-        return tuple((self.root + interval) % 12 for interval in formula)
+        pcs = tuple((self.root + interval) % 12 for interval in formula)
+        if self.bass_note is not None and self.bass_note not in pcs:
+            pcs = (self.bass_note,) + pcs
+        return pcs
 
     @property
     def pitch_class_set(self) -> frozenset[int]:
@@ -187,9 +201,33 @@ class Chord:
 
     @property
     def display_name(self) -> str:
-        """Human-readable chord name, e.g. 'Am7', 'F#maj7'."""
-        return note_name(self.root) + QUALITY_DISPLAY.get(self.quality, self.quality)
+        """Human-readable chord name, e.g. 'Am7', 'F#maj7', 'D/F#'."""
+        name = note_name(self.root) + QUALITY_DISPLAY.get(self.quality, self.quality)
+        if self.bass_note is not None:
+            name += "/" + note_name(self.bass_note)
+        return name
 
+    @property
+    def is_inversion(self) -> bool:
+        """True if the bass note is already a chord tone (inversion),
+        False if it adds a new pitch class (true slash chord)."""
+        if self.bass_note is None:
+            return False
+        formula = CHORD_FORMULAS[self.quality]
+        chord_pcs = {(self.root + interval) % 12 for interval in formula}
+        return self.bass_note in chord_pcs
+
+    @property
+    def inversion_number(self) -> int:
+        """Return inversion number (1=first, 2=second, 3=third). 0 if root position or not an inversion."""
+        if not self.is_inversion:
+            return 0
+        formula = CHORD_FORMULAS[self.quality]
+        chord_pcs = [(self.root + interval) % 12 for interval in formula]
+        if self.bass_note in chord_pcs:
+            return chord_pcs.index(self.bass_note)
+        return 0
+    
     @property
     def intervals(self) -> tuple[int, ...]:
         """Return the interval formula for this chord's quality."""

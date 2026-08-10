@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QSize, QSettings, QStandardPaths
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QMessageBox
 import json
+from typing import Optional
 import os
 from datetime import datetime
 
@@ -589,8 +590,55 @@ class ChordBuilder(QWidget):
             self.category_buttons[category] = btn
             category_row.addWidget(btn)
         
+        category_row.addSpacing(15)
+        self.bass_toggle = QPushButton("Slash /")
+        self.bass_toggle.setCheckable(True)
+        self.bass_toggle.setFixedSize(70, 32)
+        self.bass_toggle.setStyleSheet("""
+            QPushButton {
+                background-color: #45475a;
+                color: #cdd6f4;
+                border: 1px solid #585b70;
+                border-radius: 4px;
+                font-size: 10pt;
+                font-weight: bold;
+            }
+            QPushButton:checked {
+                background-color: #f38ba8;
+                color: #1e1e2e;
+                border: 1px solid #f38ba8;
+            }
+        """)
+        self.bass_toggle.toggled.connect(self._toggle_bass_row)
+        category_row.addWidget(self.bass_toggle)
+
         category_row.addStretch()
         layout.addLayout(category_row)
+        
+                
+        # Bass note selector row (hidden until / Bass is toggled)
+        self.bass_row = QHBoxLayout()
+        self.bass_row_widget = QWidget()
+        bass_row_inner = QHBoxLayout(self.bass_row_widget)
+        bass_row_inner.setContentsMargins(0, 0, 0, 0)
+        bass_row_inner.addWidget(QLabel("Bass:"))
+        self.bass_group = QButtonGroup(self)
+        self.bass_group.setExclusive(False)
+        self._bass_buttons: list[QPushButton] = []
+        for pc in range(12):
+            btn = QPushButton(note_name(pc))
+            btn.setCheckable(True)
+            btn.setFixedWidth(45)
+            self.bass_group.addButton(btn, pc)
+            bass_row_inner.addWidget(btn)
+            self._bass_buttons.append(btn)
+        self.bass_clear = QPushButton("✕")
+        self.bass_clear.setFixedWidth(35)
+        self.bass_clear.clicked.connect(self._clear_bass)
+        bass_row_inner.addWidget(self.bass_clear)
+        bass_row_inner.addStretch()
+        self.bass_row_widget.setVisible(False)
+        layout.addWidget(self.bass_row_widget)
         
         # Quality buttons (will change based on category selection)
         self.quality_row = QHBoxLayout()
@@ -741,6 +789,8 @@ class ChordBuilder(QWidget):
         self.per_chord_container_layout.addStretch()
 
         self.per_chord_scroll.setWidget(self.per_chord_container)
+        self._active_idiom_filters: set[str] = set()
+        self._all_option_rows: list[tuple[_ScaleOptionRow, list[str]]] = []
         self.results_tabs.addTab(per_chord_tab, "Per Chord")
 
         layout.addWidget(results_group)
@@ -952,7 +1002,23 @@ class ChordBuilder(QWidget):
         from gui.saved_library import register_save
         register_save(filepath, name, n_chords)
 
+    def _toggle_bass_row(self, checked: bool) -> None:
+        self.bass_row_widget.setVisible(checked)
+        if not checked:
+            self._clear_bass()
 
+    def _clear_bass(self) -> None:
+        self.bass_group.setExclusive(False)
+        for btn in self._bass_buttons:
+            btn.setChecked(False)
+        self.bass_group.setExclusive(False)
+
+    def _selected_bass(self) -> Optional[int]:
+        for btn in self._bass_buttons:
+            if btn.isChecked():
+                return self.bass_group.id(btn)
+        return None
+    
     def _add_chord(self) -> None:
         root = GUITAR_NAMES[self.root_group.checkedId()]
         # Get selected category and quality
@@ -961,6 +1027,9 @@ class ChordBuilder(QWidget):
         quality_id = self.quality_group.checkedId()
         quality = QUALITY_CATEGORIES[category_name][quality_id]
         symbol = root + QUALITY_DISPLAY.get(quality, quality or "maj")
+        bass = self._selected_bass()
+        if bass is not None:
+            symbol += "/" + note_name(bass)
 
         chord = Chord.parse(symbol)
         self.progression.chords.append(chord)
@@ -1079,6 +1148,7 @@ class ChordBuilder(QWidget):
         modulating progressions show per-section divider headers. Falls
         back to analyze_key() if section analysis returns None.
         """
+        
         # Clear out the existing container contents (placeholder or prior render)
         while self.per_chord_container_layout.count() > 0:
             item = self.per_chord_container_layout.takeAt(0)
@@ -1106,10 +1176,47 @@ class ChordBuilder(QWidget):
             self.per_chord_container_layout.addWidget(msg)
             self.per_chord_container_layout.addStretch()
             return
-
+        
         # Get Roman labels and per-chord scale advice
         roman_labels = analyze_roman(self.progression, ka)
         advice = analyze_chord_scales(self.progression, ka, roman_labels)
+
+        # Idiom filter row
+        self._active_idiom_filters.clear()
+        self._all_option_rows.clear()
+        filter_row = QWidget()
+        filter_layout = QHBoxLayout(filter_row)
+        filter_layout.setContentsMargins(4, 4, 4, 4)
+        filter_layout.setSpacing(6)
+        filter_label = QLabel("Filter:")
+        filter_label.setStyleSheet(
+            "color: #a6adc8; font-size: 10pt; background: transparent;"
+        )
+        filter_layout.addWidget(filter_label)
+
+        self._idiom_pills: dict[str, QLabel] = {}
+        for idiom in ALL_IDIOMS:
+            pill = QLabel(idiom.replace("_", " "))
+            color = IDIOM_COLORS.get(idiom, "#6c7086")
+            pill.setStyleSheet(f"""
+                QLabel {{
+                    color: {color};
+                    background-color: rgba(180, 190, 254, 20);
+                    border: 1px solid {color};
+                    border-radius: 8px;
+                    padding: 3px 10px;
+                    font-size: 9pt;
+                    font-weight: bold;
+                }}
+            """)
+            pill.setCursor(Qt.CursorShape.PointingHandCursor)
+            pill.mousePressEvent = lambda e, i=idiom: self._toggle_idiom_filter(i)
+            filter_layout.addWidget(pill)
+            self._idiom_pills[idiom] = pill
+
+        filter_layout.addStretch()
+        self.per_chord_container_layout.addWidget(filter_row)
+        
 
         # Build a map of section start indices → section, so we can emit
         # a section divider header at the right points (multi-section only).
@@ -1134,6 +1241,9 @@ class ChordBuilder(QWidget):
                 chord_obj=chord,
             )
             self.per_chord_container_layout.addWidget(chord_section)
+
+            for row in chord_section.findChildren(_ScaleOptionRow):
+                self._all_option_rows.append((row, row.option.idioms))
 
         # Stretch at the bottom so sections pack to the top
         self.per_chord_container_layout.addStretch()
@@ -1172,6 +1282,45 @@ class ChordBuilder(QWidget):
 
         self.per_chord_container_layout.addWidget(divider_widget)
 
+    def _toggle_idiom_filter(self, idiom: str) -> None:
+        if idiom in self._active_idiom_filters:
+            self._active_idiom_filters.discard(idiom)
+        else:
+            self._active_idiom_filters.add(idiom)
+
+        for tag, pill in self._idiom_pills.items():
+            color = IDIOM_COLORS.get(tag, "#6c7086")
+            if tag in self._active_idiom_filters:
+                pill.setStyleSheet(f"""
+                    QLabel {{
+                        color: #1e1e2e;
+                        background-color: {color};
+                        border: 1px solid {color};
+                        border-radius: 8px;
+                        padding: 3px 10px;
+                        font-size: 9pt;
+                        font-weight: bold;
+                    }}
+                """)
+            else:
+                pill.setStyleSheet(f"""
+                    QLabel {{
+                        color: {color};
+                        background-color: rgba(180, 190, 254, 20);
+                        border: 1px solid {color};
+                        border-radius: 8px;
+                        padding: 3px 10px;
+                        font-size: 9pt;
+                        font-weight: bold;
+                    }}
+                """)
+
+        for row, idioms in self._all_option_rows:
+            if not self._active_idiom_filters:
+                row.setVisible(True)
+            else:
+                row.setVisible(bool(self._active_idiom_filters & set(idioms)))
+    
     def _on_scale_clicked(self, item) -> None:
         match = item.data(Qt.ItemDataRole.UserRole)
         if match is not None:
