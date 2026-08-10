@@ -279,7 +279,7 @@ class SavedProgressionsTab(QWidget):
             if item is None:
                 continue
             widget = item.widget()
-            if widget is not None:
+            if widget is not None and widget is not self.empty_label:
                 widget.setParent(None)
                 widget.deleteLater()
         self._entry_rows.clear()
