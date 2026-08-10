@@ -122,16 +122,14 @@ class FretboardWidget(QWidget):
         fretboard_end_ratio = 0.7125
 
         # Strings are between ~40% and ~60% of height (center band)
-        string_top_ratio = 0.43
-        string_bottom_ratio = 0.57
+        string_top_nut = 0.445
+        string_bottom_nut = 0.555
+        string_top_body = 0.423
+        string_bottom_body = 0.578
 
         fretboard_pixel_start = int(scaled_width * fretboard_start_ratio)
         fretboard_pixel_end = int(scaled_width * fretboard_end_ratio)
         fretboard_pixel_width = fretboard_pixel_end - fretboard_pixel_start
-
-        string_pixel_top = int(scaled_height * string_top_ratio)
-        string_pixel_bottom = int(scaled_height * string_bottom_ratio)
-        string_pixel_height = string_pixel_bottom - string_pixel_top
 
         # Calculate fret positions using equal temperament
         self.fret_positions = []
@@ -146,11 +144,13 @@ class FretboardWidget(QWidget):
                 fret_x = x_offset + fretboard_pixel_end - int(fretboard_pixel_width * distance_ratio)
             self.fret_positions.append(fret_x)
 
-        # Calculate string positions (6 strings evenly spaced)
-        self.string_positions = []
-        for string_idx in range(6):
-            string_y = y_offset + string_pixel_top + int((string_pixel_height / 5) * string_idx)
-            self.string_positions.append(string_y)
+        # Store string spread at nut vs body for per-fret interpolation
+        self.string_nut_top = y_offset + int(scaled_height * string_top_nut)
+        self.string_nut_bottom = y_offset + int(scaled_height * string_bottom_nut)
+        self.string_body_top = y_offset + int(scaled_height * string_top_body)
+        self.string_body_bottom = y_offset + int(scaled_height * string_bottom_body)
+        
+        self._draw_note_overlays(painter)
         
     def _draw_note_overlays(self, painter: QPainter):
         """Draw colored circles for highlighted notes."""
@@ -161,7 +161,7 @@ class FretboardWidget(QWidget):
             if fret_num >= len(self.fret_positions):
                 continue
 
-            if string_idx >= len(self.string_positions):
+            if string_idx >= 6:
                 continue
 
             # Calculate position
@@ -172,7 +172,11 @@ class FretboardWidget(QWidget):
                 # Between frets
                 note_x = (self.fret_positions[fret_num - 1] + self.fret_positions[fret_num]) / 2
 
-            note_y = self.string_positions[string_idx]
+            fret_t = fret_num / self.num_frets
+            top_y = self.string_nut_top + (self.string_body_top - self.string_nut_top) * fret_t
+            bottom_y = self.string_nut_bottom + (self.string_body_bottom - self.string_nut_bottom) * fret_t
+            spread = bottom_y - top_y
+            note_y = top_y + (spread / 5) * string_idx
 
             # Get color (default red for root, blue for others)
             color = self.note_colors.get((string_idx, fret_num), QColor(239, 68, 68))  # Catppuccin red
