@@ -116,8 +116,8 @@ class MainWindow(QMainWindow):
         tuning = self.fretboard.tuning
         positions = set()
         colors = {}
-        ROOT_COLOR = QColor(249, 226, 175)   # gold — root
-        TONE_COLOR = QColor(137, 180, 250)   # blue — other tones
+        ROOT_COLOR = QColor(243, 139, 168, 120)   # pink — root
+        TONE_COLOR = QColor(137, 180, 250, 120)   # blue — other tones
         for string_idx in range(tuning.num_strings):
             for pc in pitch_classes:
                 for fret in tuning.fret_for_note(string_idx, pc):

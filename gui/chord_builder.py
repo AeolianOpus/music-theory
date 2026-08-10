@@ -11,7 +11,7 @@ from datetime import datetime
 
 from core.audio_engine import AudioEngine, PIANO_CHANNEL
 from core.music_theory import QUALITY_FULL_NAMES, Chord, ChordProgression, SHARP_NAMES, GUITAR_NAMES, CHORD_FORMULAS, QUALITY_DISPLAY, QUALITY_FULL_NAMES, note_name
-from core.scale_matcher import suggest_scales, detect_key
+from core.scale_matcher import suggest_scales, detect_key, match_scale
 from core.key_analyzer import analyze_key
 from core.modulation_detector import analyze_key_sections
 from core.roman_analyzer import analyze_roman
@@ -159,7 +159,7 @@ class ChordChip(QWidget):
 
     delete_requested = Signal(object)  # emits self
 
-    def __init__(self, chord_display: str, parent=None):
+    def __init__(self, chord_display: str, roman: str = "", parent=None):
         super().__init__(parent)
         self.chord_display = chord_display
 
@@ -167,11 +167,24 @@ class ChordChip(QWidget):
         layout.setContentsMargins(10, 4, 4, 4)
         layout.setSpacing(4)
 
+        text_col = QVBoxLayout()
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.setSpacing(0)
+
         self.label = QLabel(chord_display)
         self.label.setStyleSheet(
             "color: #cdd6f4; font-size: 14pt; font-weight: bold; background: transparent;"
         )
-        layout.addWidget(self.label)
+        text_col.addWidget(self.label)
+
+        if roman:
+            self.roman_label = QLabel(roman)
+            self.roman_label.setStyleSheet(
+                "color: #89b4fa; font-size: 9pt; font-style: italic; background: transparent;"
+            )
+            text_col.addWidget(self.roman_label)
+
+        layout.addLayout(text_col)
 
         self.delete_btn = QPushButton("×")
         self.delete_btn.setFixedSize(20, 20)
@@ -441,9 +454,35 @@ class _ChordAdviceSection(QFrame):
             )
             outer.addWidget(empty)
         else:
-            for option in options:
+            hidden_rows: list[_ScaleOptionRow] = []
+            for idx, option in enumerate(options):
                 row = _ScaleOptionRow(option, chord_obj)
                 outer.addWidget(row)
+                if idx >= DEFAULT_OPTIONS_VISIBLE:
+                    row.setVisible(False)
+                    hidden_rows.append(row)
+
+            if hidden_rows:
+                n = len(hidden_rows)
+                more_link = QLabel(f"+ {n} more suggestion{'s' if n > 1 else ''}")
+                more_link.setStyleSheet(
+                    "color: #89b4fa; font-size: 10pt; padding: 4px 8px; "
+                    "background: transparent;"
+                )
+                more_link.setCursor(Qt.CursorShape.PointingHandCursor)
+
+                def toggle_hidden(lbl=more_link, rows=hidden_rows, count=n):
+                    showing = rows[0].isVisible()
+                    for r in rows:
+                        r.setVisible(not showing)
+                    lbl.setText(
+                        f"− hide {count} suggestion{'s' if count > 1 else ''}"
+                        if not showing
+                        else f"+ {count} more suggestion{'s' if count > 1 else ''}"
+                    )
+
+                more_link.mousePressEvent = lambda e, fn=toggle_hidden: fn()
+                outer.addWidget(more_link)
 
 class ChordBuilder(QWidget):
     # Signal other widgets can listen to (fretboard, piano, etc.)
@@ -580,7 +619,7 @@ class ChordBuilder(QWidget):
         self.progression_list.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.progression_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.progression_list.setSpacing(6)
-        self.progression_list.setFixedHeight(60)
+        self.progression_list.setFixedHeight(80)
         self.progression_list.setStyleSheet("""
             QListWidget {
                 background-color: #1e1e2e;
@@ -736,8 +775,8 @@ class ChordBuilder(QWidget):
     def _stop(self) -> None:
         if self.audio and self.audio.is_ready:
             self.audio.all_notes_off()
-        
-    # Stop progression playback
+
+        # Stop progression playback
         self.is_playing_progression = False
 
     # ── Save / Load progression ──────────────────────────────────────
@@ -952,17 +991,26 @@ class ChordBuilder(QWidget):
         self.progression_list.setVisible(True)
         self.progression_empty_label.setVisible(False)
 
+        # Compute Roman labels if we have enough chords
+        roman_labels: list[str] = []
+        if len(self.progression.chords) >= 2:
+            ka = analyze_key(self.progression)
+            if ka is not None:
+                rl = analyze_roman(self.progression, ka)
+                roman_labels = [r.numeral for r in rl]
+
         # Build a chip for each chord
         for i, chord in enumerate(self.progression.chords):
             display = chord.display_name
             if current_index is not None and i == current_index:
                 display = f"▶ {display}"
 
-            chip = ChordChip(display)
+            roman = roman_labels[i] if i < len(roman_labels) else ""
+            chip = ChordChip(display, roman=roman)
             chip.delete_requested.connect(self._on_chip_delete)
 
             item = QListWidgetItem()
-            item.setSizeHint(chip.sizeHint() + QSize(8, 8))
+            item.setSizeHint(chip.sizeHint() + QSize(8, 12))
             self.progression_list.addItem(item)
             self.progression_list.setItemWidget(item, chip)
 
@@ -993,12 +1041,23 @@ class ChordBuilder(QWidget):
         self._populate_per_chord_tab()
 
     def _populate_whole_progression_tab(self) -> None:
-        """Fill the whole-progression results list using the legacy
-        coverage-based scale matcher. Original Scale Suggestions behavior."""
+        """Fill the whole-progression results list. Shows key-analyzer scales
+        first (the musically correct answer), then coverage-based matches."""
         self.results_list.clear()
+
+        ka = analyze_key(self.progression)
+        if ka is not None and ka.parent_scales:
+            self.results_list.addItem("── Key Scales ──")
+            for scale in ka.parent_scales:
+                m = match_scale(self.progression, scale)
+                item = QListWidgetItem(f"  {m.display_name}")
+                item.setData(Qt.ItemDataRole.UserRole, m)
+                self.results_list.addItem(item)
+            self.results_list.addItem("")
+
         results = suggest_scales(self.progression, top_n=3, alternatives=5)
 
-        self.results_list.addItem("── Top Matches ──")
+        self.results_list.addItem("── Coverage Matches ──")
         for m in results["top"]:
             miss = f"  (missing: {', '.join(m.missing_note_names())})" if m.missing_notes else "  ✓"
             item = QListWidgetItem(f"  {m.display_name}   score: {m.score:.0%}{miss}")
