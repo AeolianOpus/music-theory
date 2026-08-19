@@ -159,6 +159,7 @@ class ChordChip(QWidget):
     """A single chord chip: name + × button, draggable via the parent list."""
 
     delete_requested = Signal(object)  # emits self
+    right_clicked = Signal(int)        # emits chord index
 
     def __init__(self, chord_display: str, roman: str = "", parent=None):
         super().__init__(parent)
@@ -217,7 +218,10 @@ class ChordChip(QWidget):
                 border-color: #89b4fa;
             }
         """)
-        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.chord_index: int = -1
+
+    def contextMenuEvent(self, event) -> None:
+        self.right_clicked.emit(self.chord_index)
         
 class _IdiomPill(QLabel):
     """A single idiom tag rendered as a colored pill. Used inside
@@ -489,6 +493,7 @@ class ChordBuilder(QWidget):
     # Signal other widgets can listen to (fretboard, piano, etc.)
     progression_changed = Signal(object)   # emits ChordProgression
     scale_selected = Signal(object)        # emits ScaleMatch
+    chord_tones_selected = Signal(object)  # emits Chord
     
     def __init__(self, audio_engine: AudioEngine | None = None, parent=None):
         super().__init__(parent)
@@ -1076,7 +1081,9 @@ class ChordBuilder(QWidget):
 
             roman = roman_labels[i] if i < len(roman_labels) else ""
             chip = ChordChip(display, roman=roman)
+            chip.chord_index = i
             chip.delete_requested.connect(self._on_chip_delete)
+            chip.right_clicked.connect(self._on_chip_right_click)
 
             item = QListWidgetItem()
             item.setSizeHint(chip.sizeHint() + QSize(8, 12))
@@ -1320,6 +1327,59 @@ class ChordBuilder(QWidget):
                 row.setVisible(True)
             else:
                 row.setVisible(bool(self._active_idiom_filters & set(idioms)))
+    
+    def _on_chip_right_click(self, chord_idx: int) -> None:
+        from PySide6.QtWidgets import QMenu
+        if chord_idx < 0 or chord_idx >= len(self.progression.chords):
+            return
+
+        chord = self.progression.chords[chord_idx]
+
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #313244;
+                color: #cdd6f4;
+                border: 1px solid #45475a;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 16px;
+            }
+            QMenu::item:selected {
+                background-color: #45475a;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: #45475a;
+                margin: 4px 8px;
+            }
+        """)
+
+        tone_names = ", ".join(note_name(pc) for pc in chord.pitch_classes)
+        chord_tone_action = menu.addAction(f"Chord tones ({tone_names})")
+        chord_tone_action.setData(("chord", chord))
+
+        menu.addSeparator()
+
+        ka = analyze_key(self.progression)
+        if ka is not None:
+            roman_labels = analyze_roman(self.progression, ka)
+            advice = analyze_chord_scales(self.progression, ka, roman_labels)
+            if chord_idx < len(advice):
+                for opt in advice[chord_idx].options[:5]:
+                    action = menu.addAction(opt.scale.display_name)
+                    action.setData(("scale", opt))
+
+        chosen = menu.exec(self.cursor().pos())
+        if chosen is not None:
+            data = chosen.data()
+            if data[0] == "chord":
+                self.chord_tones_selected.emit(data[1])
+            elif data[0] == "scale":
+                from core.scale_matcher import match_scale
+                m = match_scale(self.progression, data[1].scale)
+                self.scale_selected.emit(m)
     
     def _on_scale_clicked(self, item) -> None:
         match = item.data(Qt.ItemDataRole.UserRole)

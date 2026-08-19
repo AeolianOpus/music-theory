@@ -19,6 +19,7 @@ class FretboardWidget(QWidget):
         self.num_frets = 21
         self.highlighted_notes: set[tuple[int, int]] = set()
         self.note_colors: dict[tuple[int, int], QColor] = {}
+        self.text_colors: dict[tuple[int, int], QColor] = {}
         self.show_note_names = True
         
         # Fretboard display dimensions (set in paintEvent)
@@ -196,7 +197,8 @@ class FretboardWidget(QWidget):
 
             # Draw note name if enabled
             if self.show_note_names:
-                painter.setPen(QColor(255, 255, 255))
+                text_color = self.text_colors.get((string_idx, fret_num), QColor(255, 255, 255))
+                painter.setPen(text_color)
                 painter.setFont(QFont("Arial", 8, QFont.Weight.Bold))
                 note_label = self.tuning.note_name_at(string_idx, fret_num)
                 painter.drawText(
@@ -277,10 +279,11 @@ class FretboardWidget(QWidget):
         self.tuning = tuning
         self.update()
     
-    def highlight_notes(self, notes: set[tuple[int, int]], colors: dict[tuple[int, int], QColor] | None = None):
+    def highlight_notes(self, notes: set[tuple[int, int]], colors: dict[tuple[int, int], QColor] | None = None, text_colors: dict[tuple[int, int], QColor] | None = None):
         """Highlight specific notes on the fretboard."""
         self.highlighted_notes = notes
         self.note_colors = colors or {}
+        self.text_colors = text_colors or {}
         self.update()
     
     def clear_highlights(self):
