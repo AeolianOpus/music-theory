@@ -11,6 +11,7 @@ import os
 from datetime import datetime
 
 from core.audio_engine import AudioEngine, PIANO_CHANNEL
+from core.playback import PlaybackEngine, STYLE_PRESETS
 from core.music_theory import QUALITY_FULL_NAMES, Chord, ChordProgression, SHARP_NAMES, GUITAR_NAMES, CHORD_FORMULAS, QUALITY_DISPLAY, QUALITY_FULL_NAMES, note_name
 from core.scale_matcher import suggest_scales, detect_key, match_scale
 from core.key_analyzer import analyze_key
@@ -499,7 +500,7 @@ class ChordBuilder(QWidget):
         super().__init__(parent)
         self.progression = ChordProgression()
         self.audio = audio_engine
-        self.is_playing_progression = False  # Track progression playback state
+        self.playback = PlaybackEngine(audio_engine) if audio_engine else None
         self._setup_ui()
         
     def _setup_ui(self):
@@ -718,25 +719,29 @@ class ChordBuilder(QWidget):
         self.stop_progression_btn.setEnabled(False)  # Disabled until progression plays
         progression_controls.addWidget(self.stop_progression_btn)
         
-        progression_controls.addWidget(QLabel("Chord Duration:"))
+        progression_controls.addWidget(QLabel("Tempo:"))
         from PySide6.QtWidgets import QSpinBox
-        self.chord_duration = QSpinBox()
-        self.chord_duration.setRange(500, 5000)  # 0.5 to 5 seconds
-        self.chord_duration.setValue(1500)  # Default 1.5 seconds
-        self.chord_duration.setSuffix(" ms")
-        progression_controls.addWidget(self.chord_duration)
-        
+        self.tempo_spin = QSpinBox()
+        self.tempo_spin.setRange(40, 240)
+        self.tempo_spin.setValue(120)
+        self.tempo_spin.setSuffix(" BPM")
+        self.tempo_spin.valueChanged.connect(self._on_tempo_changed)
+        progression_controls.addWidget(self.tempo_spin)
+
+        progression_controls.addWidget(QLabel("Style:"))
+        from PySide6.QtWidgets import QComboBox
+        self.style_combo = QComboBox()
+        for style_name in STYLE_PRESETS.keys():
+            self.style_combo.addItem(style_name.replace("_", " ").title(), style_name)
+        progression_controls.addWidget(self.style_combo)
+
         from PySide6.QtWidgets import QCheckBox
         self.loop_progression = QCheckBox("Loop")
         progression_controls.addWidget(self.loop_progression)
-        
-        # Add rhythm pattern selector
-        progression_controls.addWidget(QLabel("Pattern:"))
-        from PySide6.QtWidgets import QComboBox
-        self.rhythm_pattern = QComboBox()
-        for pattern_name in RHYTHM_PATTERNS.keys():
-            self.rhythm_pattern.addItem(pattern_name)
-        progression_controls.addWidget(self.rhythm_pattern)
+
+        self.click_track = QCheckBox("Click")
+        self.click_track.setChecked(True)
+        progression_controls.addWidget(self.click_track)
         
         progression_controls.addStretch()
         layout.addLayout(progression_controls)
@@ -830,9 +835,8 @@ class ChordBuilder(QWidget):
     def _stop(self) -> None:
         if self.audio and self.audio.is_ready:
             self.audio.all_notes_off()
-
-        # Stop progression playback
-        self.is_playing_progression = False
+        if self.playback:
+            self.playback.stop()
 
     # ── Save / Load progression ──────────────────────────────────────
 
@@ -1415,84 +1419,37 @@ class ChordBuilder(QWidget):
             self.quality_buttons[0].setChecked(True)   
     
     def _play_progression(self) -> None:
-        """Play through the entire chord progression."""
+        """Play the progression using the PlaybackEngine."""
         if not self.progression.chords:
             return
-        
-        if not self.audio or not self.audio.is_ready:
+        if not self.playback:
             return
-        
-        # Set playback flag
-        self.is_playing_progression = True
+
         self.play_progression_btn.setEnabled(False)
         self.stop_progression_btn.setEnabled(True)
-        
-        import threading
-        
-        def play_sequence():
-            if not self.audio:  # Extra safety check
-                return
-                
-            audio_engine = self.audio  # Local variable for type checker
-            duration_ms = self.chord_duration.value()
-            duration_sec = duration_ms / 1000.0
-            
-            # Get rhythm pattern
-            pattern_name = self.rhythm_pattern.currentText()
-            pattern = RHYTHM_PATTERNS[pattern_name]
-            
-            while self.is_playing_progression:
-                for i, chord in enumerate(self.progression.chords):
-                    # Check if we should stop
-                    if not self.is_playing_progression:
-                        break
-                    
-                    # Calculate duration based on rhythm pattern
-                    pattern_index = i % len(pattern)
-                    chord_duration = duration_sec * pattern[pattern_index]
-                    
-                    # Update UI to highlight current chord
-                    self._update_progression_display(current_index=i)
-                    
-                    # Build MIDI notes for this chord
-                    root = chord.root
-                    intervals = chord.intervals
-                    base = 60 + root
-                    notes = []
-                    for idx, interval in enumerate(intervals):
-                        note = base + interval
-                        if idx > 0 and note <= notes[-1]:
-                            note += 12
-                        notes.append(note)
-                    
-                    # Play the chord
-                    audio_engine.play_chord_async(PIANO_CHANNEL, notes, duration=chord_duration)
-                    
-                    # Wait for chord duration
-                    import time
-                    time.sleep(chord_duration)
-                
-                # Check if we should loop
-                if not self.loop_progression.isChecked():
-                    self.is_playing_progression = False
-                    break
-            
-            # Reset display when done
-            self._update_progression_display()
-            self.stop_progression_btn.setEnabled(False)
-            self.play_progression_btn.setEnabled(True)
-        
-        # Run in background thread so UI doesn't freeze
-        thread = threading.Thread(target=play_sequence, daemon=True)
-        thread.start()
+
+        style = self.style_combo.currentData()
+        self.playback.play_progression(
+            progression=self.progression,
+            tempo=self.tempo_spin.value(),
+            style=style,
+            click_track=self.click_track.isChecked(),
+            loop=self.loop_progression.isChecked(),
+            transpose=-1,
+        )
     
     def _stop_progression(self) -> None:
         """Stop progression playback."""
-        self.is_playing_progression = False
+        if self.playback:
+            self.playback.stop()
         self.stop_progression_btn.setEnabled(False)
         self.play_progression_btn.setEnabled(True)
-        if self.audio and self.audio.is_ready:
-            self.audio.all_notes_off()
+        self._update_progression_display()
+        
+    def _on_tempo_changed(self, bpm: int) -> None:
+        """Update tempo live during playback."""
+        if self.playback and self.playback.is_playing():
+            self.playback.set_tempo(bpm)
             
     def _on_chip_delete(self, chip: ChordChip):
         """User clicked × on a chord chip."""

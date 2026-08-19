@@ -220,6 +220,7 @@ class PlaybackEngine:
         click_track: bool = True,
         loop: bool = False,
         bars_per_chord: float = 1.0,
+        transpose: int = 0,
     ) -> None:
         """
         Start playing the given progression. Returns immediately;
@@ -299,7 +300,7 @@ class PlaybackEngine:
         self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._playback_loop,
-            args=(progression, instruments, click_track, loop, bars_per_chord),
+            args=(progression, instruments, click_track, loop, bars_per_chord, transpose),
             daemon=True,
         )
         self._thread.start()
@@ -341,6 +342,7 @@ class PlaybackEngine:
         click_track: bool,
         loop: bool,
         bars_per_chord: float,
+        transpose: int = 0,
     ) -> None:
         """The master playback thread. Runs until stop_event or progression ends."""
         try:
@@ -348,7 +350,7 @@ class PlaybackEngine:
                 for chord in progression.chords:
                     if self._stop_event.is_set():
                         break
-                    self._play_one_chord(chord, instruments, click_track, bars_per_chord)
+                    self._play_one_chord(chord, instruments, click_track, bars_per_chord, transpose)
                 if not loop:
                     break
         finally:
@@ -361,6 +363,7 @@ class PlaybackEngine:
         instruments: dict[str, Optional[str]],
         click_track: bool,
         bars_per_chord: float,
+        transpose: int = 0,
     ) -> None:
         """Play one chord for its bar duration with all enabled layers."""
         # Get current tempo (may have changed mid-playback)
@@ -373,11 +376,11 @@ class PlaybackEngine:
         bar_duration = total_beats * seconds_per_beat
 
         # Determine notes per layer
-        bass_note = _bass_note(chord.root) if instruments["bass"] else None
-        chord_notes = _chord_voicing(chord) if instruments["chord"] else None
-        pad_notes = _pad_voicing(chord) if instruments["pad"] else None
-        choir_notes = _choir_voicing(chord) if instruments["choir"] else None
-        drone_notes = _drone_notes(chord.root) if instruments["drone"] else None
+        bass_note = (_bass_note(chord.root) + transpose) if instruments["bass"] else None
+        chord_notes = [n + transpose for n in _chord_voicing(chord)] if instruments["chord"] else None
+        pad_notes = [n + transpose for n in _pad_voicing(chord)] if instruments["pad"] else None
+        choir_notes = [n + transpose for n in _choir_voicing(chord)] if instruments["choir"] else None
+        drone_notes = [n + transpose for n in _drone_notes(chord.root)] if instruments["drone"] else None
 
         # Note-on for all layers
         if bass_note is not None:
