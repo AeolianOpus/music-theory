@@ -47,6 +47,7 @@ class MainWindow(QMainWindow):
 
         # Connect scale selection to fretboard
         self.chord_builder.scale_selected.connect(self._update_fretboard_from_scale)
+        self.chord_builder.chord_tones_selected.connect(self._update_fretboard_from_chord)
         self.chord_builder.progression_changed.connect(self._update_fretboard_from_progression)
 
         self.tabs.addTab(self._placeholder("Piano Keyboard",
@@ -116,22 +117,41 @@ class MainWindow(QMainWindow):
         tuning = self.fretboard.tuning
         positions = set()
         colors = {}
-        ROOT_COLOR = QColor(243, 139, 168, 120)   # pink — root
-        TONE_COLOR = QColor(137, 180, 250, 120)   # blue — other tones
+        text_colors = {}
+        ROOT_COLOR = QColor(243, 139, 168, 155)   # pink — root
+        TONE_COLOR = QColor(137, 180, 250, 155)   # blue — other tones
+        THIRD_TEXT = QColor(255, 50, 255)         # bright fuchsia text for 3rd
+        FIFTH_TEXT = QColor(152, 255, 200)        # mint text for 5th
+
+        third_pc = (root_pc + 3) % 12 if root_pc is not None else None
+        major_third_pc = (root_pc + 4) % 12 if root_pc is not None else None
+        fifth_pc = (root_pc + 7) % 12 if root_pc is not None else None
+
         for string_idx in range(tuning.num_strings):
             for pc in pitch_classes:
                 for fret in tuning.fret_for_note(string_idx, pc):
                     pos = (string_idx, fret)
                     positions.add(pos)
                     colors[pos] = ROOT_COLOR if pc == root_pc else TONE_COLOR
-        return positions, colors
+                    if pc == third_pc or pc == major_third_pc:
+                        text_colors[pos] = THIRD_TEXT
+                    elif pc == fifth_pc:
+                        text_colors[pos] = FIFTH_TEXT
+        return positions, colors, text_colors
 
     def _update_fretboard_from_scale(self, scale_match):
         scale = scale_match.scale
         pitch_classes = set(scale_match.scale.pitch_classes)
         root_pc = scale_match.scale.root % 12
-        positions, colors = self._note_positions(pitch_classes, root_pc)
-        self.fretboard.highlight_notes(positions, colors)
+        positions, colors, text_colors = self._note_positions(pitch_classes, root_pc)
+        self.fretboard.highlight_notes(positions, colors, text_colors)
+        self.tabs.setCurrentWidget(self.fretboard)
+
+    def _update_fretboard_from_chord(self, chord):
+        pitch_classes = set(chord.pitch_classes)
+        root_pc = chord.root % 12
+        positions, colors, text_colors = self._note_positions(pitch_classes, root_pc)
+        self.fretboard.highlight_notes(positions, colors, text_colors)
         self.tabs.setCurrentWidget(self.fretboard)
 
     def _update_fretboard_from_progression(self, progression):
@@ -145,7 +165,7 @@ class MainWindow(QMainWindow):
             for pc in chord.pitch_classes:
                 all_pcs.add(pc % 12)
             root_pcs.add(chord.root % 12)
-        positions, colors = self._note_positions(all_pcs)
+        positions, colors, _ = self._note_positions(all_pcs)
         ROOT_COLOR = QColor(249, 226, 175)
         tuning = self.fretboard.tuning
         for (string_idx, fret) in positions:
