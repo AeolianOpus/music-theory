@@ -22,6 +22,7 @@ from .audio_engine import (
     GM_DRUMS,
     DRUM_CHANNEL,
 )
+from .dawdreamer_engine import DawDreamerEngine
 
 
 # ── Channel allocation ────────────────────────────────────────────
@@ -197,8 +198,9 @@ class PlaybackEngine:
         playback.stop()
     """
 
-    def __init__(self, audio_engine: AudioEngine) -> None:
+    def __init__(self, audio_engine: AudioEngine, dawdreamer_engine: DawDreamerEngine | None = None) -> None:
         self.audio: AudioEngine = audio_engine
+        self._daw = dawdreamer_engine
         self._thread: Optional[threading.Thread] = None
         self._stop_event: threading.Event = threading.Event()
         self._tempo_lock: threading.Lock = threading.Lock()
@@ -220,6 +222,7 @@ class PlaybackEngine:
         click_track: bool = True,
         loop: bool = False,
         bars_per_chord: float = 1.0,
+        backend: str = "fluidsynth",
         transpose: int = 0,
     ) -> None:
         """
@@ -298,13 +301,91 @@ class PlaybackEngine:
             self._current_tempo = tempo
 
         self._stop_event.clear()
-        self._thread = threading.Thread(
-            target=self._playback_loop,
-            args=(progression, instruments, click_track, loop, bars_per_chord, transpose),
-            daemon=True,
-        )
+        if backend == "vst" and self._daw and self._daw.is_ready:
+            self._thread = threading.Thread(
+                target=self._playback_loop_vst,
+                args=(progression, instruments, click_track, loop, bars_per_chord, transpose),
+                daemon=True,
+            )
+        else:
+            self._thread = threading.Thread(
+                target=self._playback_loop,
+                args=(progression, instruments, click_track, loop, bars_per_chord, transpose),
+                daemon=True,
+            )
         self._thread.start()
 
+    def _playback_loop_vst(
+        self,
+        progression: ChordProgression,
+        instruments: dict[str, Optional[str]],
+        click_track: bool,
+        loop: bool,
+        bars_per_chord: float,
+        transpose: int = 0,
+    ) -> None:
+        """Playback loop using DawDreamer VST rendering."""
+        import sounddevice as sd
+
+        # Invariant: play_progression() only spawns this thread when
+        # self._daw is not None and is_ready. Narrow for the type checker
+        # and fail loud if that invariant is ever broken.
+        assert self._daw is not None, "_playback_loop_vst called without DawDreamerEngine"
+        daw = self._daw
+
+        try:
+            while not self._stop_event.is_set():
+                for chord in progression.chords:
+                    if self._stop_event.is_set():
+                        break
+
+                    with self._tempo_lock:
+                        tempo = self._current_tempo
+
+                    beats_per_bar = 4
+                    duration_sec = (60.0 / tempo) * beats_per_bar * bars_per_chord
+
+                    chord_notes = [chord.root + 60 + iv for iv in chord.intervals]
+                    bass_note = chord.root + 36
+
+                    layers = {}
+                    if instruments.get("chord"):
+                        layers["piano"] = 90
+                    if instruments.get("bass"):
+                        layers["bass"] = 100
+                    if instruments.get("pad"):
+                        layers["pad"] = 70
+                    if instruments.get("choir"):
+                        layers["choir"] = 65
+                    if instruments.get("drone"):
+                        layers["strings"] = 60
+
+                    audio = self._daw.render_chord_layered(
+                        chord_notes=chord_notes,
+                        bass_note=bass_note,
+                        duration_sec=duration_sec,
+                        layers=layers,
+                        transpose=transpose,
+                    )
+
+                    interleaved = audio.T
+                    sd.play(interleaved, samplerate=44100)
+
+                    start = __import__("time").monotonic()
+                    while __import__("time").monotonic() - start < duration_sec:
+                        if self._stop_event.is_set():
+                            sd.stop()
+                            return
+                        __import__("time").sleep(0.05)
+                    sd.wait()
+
+                if not loop:
+                    break
+        except Exception as e:
+            print(f"VST playback error: {e}")
+        finally:
+            self._thread = None
+    
     def stop(self) -> None:
         """Stop playback. Blocks briefly until the thread cleans up."""
         self._stop_event.set()
