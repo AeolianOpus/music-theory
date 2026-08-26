@@ -30,6 +30,18 @@ HAS_SOUNDDEVICE: bool = importlib.util.find_spec("sounddevice") is not None
 SAMPLE_RATE = 44100
 BUFFER_SIZE = 512
 
+KONTAKT_VST3 = r"C:\Program Files\Common Files\VST3\Kontakt 8.vst3"
+
+DEFAULT_PRESETS = {
+    "piano": "presets/kontakt_piano_uno.bin",
+    "bass": "presets/kontakt_classic_bass.bin",
+    "strings": "presets/kontakt_strings.bin",
+    "pad": "presets/kontakt_pad.bin",
+    "drums": "presets/kontakt_drums.bin",
+    "rock_guitar": "presets/kontakt_rock_guitar.bin",
+    "choir": "presets/kontakt_choir.bin",
+}
+
 
 class DawDreamerEngine:
     """
@@ -77,6 +89,7 @@ class DawDreamerEngine:
                     self._load_plugin(name, path)
 
             self._initialized = True
+            self.load_presets()
             return True
 
         except Exception as e:
@@ -106,6 +119,27 @@ class DawDreamerEngine:
             print(f"Error loading VST '{name}': {e}")
             return False
 
+    def load_presets(self, presets: dict[str, str] | None = None) -> None:
+        """Load Kontakt instances with saved state files.
+
+        Args:
+            presets: dict mapping role names to .bin state file paths.
+                 Uses DEFAULT_PRESETS if not provided.
+        """
+        if not self.is_ready:
+            return
+
+        preset_map = presets or DEFAULT_PRESETS
+        for name, state_path in preset_map.items():
+            _RenderEngine = getattr(__import__("dawdreamer"), "RenderEngine")
+            plugin = self._engine.make_plugin_processor(name, KONTAKT_VST3)
+            if plugin is None:
+                print(f"Failed to create Kontakt instance for '{name}'")
+                continue
+            plugin.load_state(state_path)
+            self._plugins[name] = plugin
+            print(f"Loaded preset: {name}")
+    
     def list_plugins(self) -> list[str]:
         """Return names of all loaded plugins."""
         return list(self._plugins.keys())
@@ -178,6 +212,72 @@ class DawDreamerEngine:
         audio = self._engine.get_audio()
         return audio
 
+    def render_chord_layered(
+        self,
+        chord_notes: list[int],
+        bass_note: int,
+        duration_sec: float,
+        layers: dict[str, int],
+        transpose: int = 0,
+    ) -> np.ndarray:
+        """
+        Render a chord through multiple instrument layers and mix.
+
+        Args:
+            chord_notes: MIDI notes for chord voicing (e.g. [60, 64, 67])
+            bass_note: single MIDI note for bass
+            duration_sec: render duration in seconds
+            layers: dict of preset_name -> velocity for each active layer
+                    e.g. {"piano": 90, "bass": 100, "strings": 70}
+            transpose: semitone shift
+
+        Returns:
+            stereo audio array, shape [2, num_samples]
+        """
+        num_samples = int(SAMPLE_RATE * duration_sec)
+        mixed = np.zeros((2, num_samples), dtype=np.float32)
+
+        for preset_name, velocity in layers.items():
+            if preset_name not in self._plugins:
+                continue
+
+            plugin = self._plugins[preset_name]
+            plugin.clear_midi()
+
+            note_off_time = max(0.01, duration_sec - 0.05)
+
+            if preset_name == "bass":
+                shifted = bass_note + transpose
+                if 0 <= shifted <= 127:
+                    plugin.add_midi_note(shifted, velocity, 0.0, note_off_time)
+            elif preset_name == "drums":
+                beats = max(1, int(duration_sec * 2))
+                beat_dur = duration_sec / beats
+                for b in range(beats):
+                    plugin.add_midi_note(36, velocity, b * beat_dur, min(b * beat_dur + 0.1, duration_sec))
+            else:
+                for note in chord_notes:
+                    shifted = note + transpose
+                    if 0 <= shifted <= 127:
+                        plugin.add_midi_note(shifted, velocity, 0.0, note_off_time)
+
+            with self._lock:
+                self._engine.load_graph([(plugin, [])])
+                self._engine.render(duration_sec)
+
+            audio = self._engine.get_audio()
+            stereo = audio[:2]
+            if stereo.shape[1] >= num_samples:
+                mixed += stereo[:, :num_samples]
+            else:
+                mixed[:, :stereo.shape[1]] += stereo
+
+        peak = np.abs(mixed).max()
+        if peak > 0.95:
+            mixed = mixed * (0.9 / peak)
+
+        return mixed
+    
     def render_sequence(
         self,
         chords: list[list[int]],
