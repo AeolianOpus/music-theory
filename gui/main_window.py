@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from core.audio_engine import AudioEngine
+from core.dawdreamer_engine import DawDreamerEngine
 from gui.chord_builder import ChordBuilder
 from gui.saved_progressions import SavedProgressionsTab
 
@@ -11,9 +12,16 @@ from gui.saved_progressions import SavedProgressionsTab
 class MainWindow(QMainWindow):
     """Top-level application window."""
 
-    def __init__(self, audio_engine: AudioEngine, base_dir: str, parent=None):
+    def __init__(
+        self,
+        audio_engine: AudioEngine,
+        base_dir: str,
+        dawdreamer_engine: DawDreamerEngine | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.audio = audio_engine
+        self.daw = dawdreamer_engine
         self.base_dir = base_dir
 
         self.setWindowTitle("Music Theory Scale Finder")
@@ -36,7 +44,7 @@ class MainWindow(QMainWindow):
         self.tabs.setMovable(False)
 
         # ── Tabs (placeholders — each will be a full widget) ──
-        self.chord_builder = ChordBuilder(self.audio)
+        self.chord_builder = ChordBuilder(self.audio, dawdreamer_engine=self.daw)
         self.tabs.addTab(self.chord_builder, "🎵 Scale Finder")
 
         from gui.fretboard import FretboardWidget
@@ -81,11 +89,16 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self.tabs)
 
-        # Status bar
+        # Status bar — shows both backends' readiness
         self.status = QStatusBar()
         self.setStatusBar(self.status)
-        audio_status = "🔊 Audio ready" if self.audio.is_ready else "🔇 No SoundFont loaded"
-        self.status.showMessage(audio_status)
+        fs_status = "🔊 FluidSynth ready" if self.audio.is_ready else "🔇 No SoundFont"
+        vst_status = (
+            "🎹 Kontakt ready"
+            if (self.daw is not None and self.daw.is_ready)
+            else "🎹 VST offline"
+        )
+        self.status.showMessage(f"{fs_status}  |  {vst_status}")
 
     def _placeholder(self, title: str, description: str) -> QWidget:
         """Create a placeholder tab widget."""
@@ -246,4 +259,6 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """Clean up on window close."""
         self.audio.shutdown()
+        if self.daw is not None:
+            self.daw.shutdown()
         event.accept()

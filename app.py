@@ -44,7 +44,7 @@ def main():
     font = QFont("Segoe UI", 10)
     app.setFont(font)
 
-    # Initialize audio engine
+    # Initialize FluidSynth audio engine (fast path — always available)
     from core.audio_engine import AudioEngine
     audio = AudioEngine()
     sf_path = find_soundfont()
@@ -55,15 +55,33 @@ def main():
         print("No SoundFont found in soundfonts/ — audio playback disabled.")
         print("See soundfonts/README.md for download instructions.")
 
-    # Launch main window (placeholder until GUI is built)
+    # Initialize DawDreamer VST engine (studio path — optional, may fail gracefully)
+    # Loads Kontakt 8 with the 7 saved presets from presets/.
+    # If dawdreamer isn't installed, Kontakt isn't found, or preset load
+    # fails, daw stays None and the app falls back to FluidSynth-only.
+    from core.dawdreamer_engine import DawDreamerEngine
+    daw = DawDreamerEngine()
+    try:
+        if daw.initialize():
+            print(f"DawDreamer ready — loaded presets: {daw.list_plugins()}")
+        else:
+            print("DawDreamer initialization returned False — VST backend disabled.")
+            daw = None
+    except Exception as e:
+        print(f"DawDreamer failed to initialize ({e}) — VST backend disabled.")
+        daw = None
+
+    # Launch main window
     from gui.main_window import MainWindow
-    window = MainWindow(audio_engine=audio, base_dir=BASE_DIR)
+    window = MainWindow(audio_engine=audio, dawdreamer_engine=daw, base_dir=BASE_DIR)
     window.show()
 
     exit_code = app.exec()
 
     # Cleanup
     audio.shutdown()
+    if daw is not None:
+        daw.shutdown()
     sys.exit(exit_code)
 
 
