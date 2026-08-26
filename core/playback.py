@@ -360,7 +360,7 @@ class PlaybackEngine:
                     if instruments.get("drone"):
                         layers["strings"] = 60
 
-                    audio = self._daw.render_chord_layered(
+                    audio = daw.render_chord_layered(
                         chord_notes=chord_notes,
                         bass_note=bass_note,
                         duration_sec=duration_sec,

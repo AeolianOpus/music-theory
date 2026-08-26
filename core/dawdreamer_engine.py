@@ -15,6 +15,9 @@ Usage:
 """
 from __future__ import annotations
 
+import contextlib
+import os
+import sys
 import threading
 import time
 from typing import Optional, Any
@@ -25,6 +28,26 @@ import importlib.util
 HAS_DAWDREAMER: bool = importlib.util.find_spec("dawdreamer") is not None
 
 HAS_SOUNDDEVICE: bool = importlib.util.find_spec("sounddevice") is not None
+
+
+@contextlib.contextmanager
+def _silence_native_stderr():
+    """Redirect OS-level stderr (fd 2) to devnull for the duration of the
+    context. Used to swallow noisy C++ output from Kontakt's VST during
+    load_state — Python's sys.stderr redirection doesn't reach fd 2, so we
+    have to dup2 at the OS level. Restores fd 2 on exit even on exception.
+    """
+    # Flush anything Python has buffered first so we don't lose it
+    sys.stderr.flush()
+    saved_fd = os.dup(2)
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(devnull_fd, 2)
+        yield
+    finally:
+        os.dup2(saved_fd, 2)
+        os.close(devnull_fd)
+        os.close(saved_fd)
 
 # Default audio settings
 SAMPLE_RATE = 44100
@@ -124,7 +147,14 @@ class DawDreamerEngine:
 
         Args:
             presets: dict mapping role names to .bin state file paths.
-                 Uses DEFAULT_PRESETS if not provided.
+                Uses DEFAULT_PRESETS if not provided.
+
+        Note: Kontakt writes cosmetic errors ("PresetSlotManager::selectSlot",
+        "cannot resolve resource: resources_ENG", stray "nil" lines) directly
+        to OS-level stderr (fd 2) during load_state(). These are harmless in
+        a headless render context (missing GUI resources don't affect audio).
+        We redirect fd 2 to devnull only around plugin.load_state() so any
+        errors from make_plugin_processor() or elsewhere still surface.
         """
         if not self.is_ready:
             return
@@ -136,7 +166,8 @@ class DawDreamerEngine:
             if plugin is None:
                 print(f"Failed to create Kontakt instance for '{name}'")
                 continue
-            plugin.load_state(state_path)
+            with _silence_native_stderr():
+                plugin.load_state(state_path)
             self._plugins[name] = plugin
             print(f"Loaded preset: {name}")
     

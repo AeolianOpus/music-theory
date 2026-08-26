@@ -12,6 +12,7 @@ from datetime import datetime
 
 from core.audio_engine import AudioEngine, PIANO_CHANNEL
 from core.playback import PlaybackEngine, STYLE_PRESETS
+from core.dawdreamer_engine import DawDreamerEngine
 from core.music_theory import QUALITY_FULL_NAMES, Chord, ChordProgression, SHARP_NAMES, GUITAR_NAMES, CHORD_FORMULAS, QUALITY_DISPLAY, QUALITY_FULL_NAMES, note_name
 from core.scale_matcher import suggest_scales, detect_key, match_scale
 from core.key_analyzer import analyze_key
@@ -496,11 +497,21 @@ class ChordBuilder(QWidget):
     scale_selected = Signal(object)        # emits ScaleMatch
     chord_tones_selected = Signal(object)  # emits Chord
     
-    def __init__(self, audio_engine: AudioEngine | None = None, parent=None):
+    def __init__(
+        self,
+        audio_engine: AudioEngine | None = None,
+        dawdreamer_engine: DawDreamerEngine | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.progression = ChordProgression()
         self.audio = audio_engine
-        self.playback = PlaybackEngine(audio_engine) if audio_engine else None
+        self.daw = dawdreamer_engine
+        self.playback = (
+            PlaybackEngine(audio_engine, dawdreamer_engine=dawdreamer_engine)
+            if audio_engine
+            else None
+        )
         self._setup_ui()
         
     def _setup_ui(self):
