@@ -1431,15 +1431,23 @@ class ChordBuilder(QWidget):
     
     def _play_progression(self) -> None:
         """Play the progression using the PlaybackEngine."""
+        print(">>> [play trace] _play_progression entered", flush=True)
         if not self.progression.chords:
+            print(">>> [play trace] no chords, returning", flush=True)
             return
         if not self.playback:
+            print(">>> [play trace] no playback engine, returning", flush=True)
             return
 
         self.play_progression_btn.setEnabled(False)
         self.stop_progression_btn.setEnabled(True)
 
+        backend = "vst" if (self.daw is not None and self.daw.is_ready) else "fluidsynth"
+        print(f">>> [play trace] chose backend={backend}", flush=True)
+        print(f">>> [play trace] daw={self.daw}, daw.is_ready={self.daw.is_ready if self.daw else 'N/A'}", flush=True)
+
         style = self.style_combo.currentData()
+        print(f">>> [play trace] about to call play_progression(style={style})", flush=True)
         self.playback.play_progression(
             progression=self.progression,
             tempo=self.tempo_spin.value(),
@@ -1447,7 +1455,9 @@ class ChordBuilder(QWidget):
             click_track=self.click_track.isChecked(),
             loop=self.loop_progression.isChecked(),
             transpose=-1,
+            backend=backend,
         )
+        print(">>> [play trace] play_progression returned, main thread free", flush=True)
     
     def _stop_progression(self) -> None:
         """Stop progression playback."""

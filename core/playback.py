@@ -325,6 +325,7 @@ class PlaybackEngine:
         transpose: int = 0,
     ) -> None:
         """Playback loop using DawDreamer VST rendering."""
+        print(">>> [vst-loop trace] thread entered", flush=True)
         import sounddevice as sd
 
         # Invariant: play_progression() only spawns this thread when
@@ -332,6 +333,7 @@ class PlaybackEngine:
         # and fail loud if that invariant is ever broken.
         assert self._daw is not None, "_playback_loop_vst called without DawDreamerEngine"
         daw = self._daw
+        print(">>> [vst-loop trace] daw narrowed, about to enter main loop", flush=True)
 
         try:
             while not self._stop_event.is_set():
@@ -360,6 +362,7 @@ class PlaybackEngine:
                     if instruments.get("drone"):
                         layers["strings"] = 60
 
+                    print(f">>> [vst-loop trace] rendering chord: notes={chord_notes}, dur={duration_sec:.2f}s, layers={list(layers.keys())}", flush=True)
                     audio = daw.render_chord_layered(
                         chord_notes=chord_notes,
                         bass_note=bass_note,
@@ -367,9 +370,11 @@ class PlaybackEngine:
                         layers=layers,
                         transpose=transpose,
                     )
+                    print(f">>> [vst-loop trace] render returned, audio shape={audio.shape}, calling sd.play", flush=True)
 
                     interleaved = audio.T
                     sd.play(interleaved, samplerate=44100)
+                    print(">>> [vst-loop trace] sd.play returned", flush=True)
 
                     start = __import__("time").monotonic()
                     while __import__("time").monotonic() - start < duration_sec:
