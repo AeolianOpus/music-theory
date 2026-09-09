@@ -55,21 +55,35 @@ def main():
         print("No SoundFont found in soundfonts/ — audio playback disabled.")
         print("See soundfonts/README.md for download instructions.")
 
-    # Initialize DawDreamer VST engine (studio path — optional, may fail gracefully)
-    # Loads Kontakt 8 with the 7 saved presets from presets/.
-    # If dawdreamer isn't installed, Kontakt isn't found, or preset load
-    # fails, daw stays None and the app falls back to FluidSynth-only.
+    # Initialize DawDreamer VST engine (studio path — optional).
+    # Construction is instant; initialize() blocks for ~30s loading Kontakt
+    # and its 7 presets, so we run it on a background thread and let the
+    # window open immediately. The engine notifies listeners when readiness
+    # settles — MainWindow subscribes to update its status bar and enable
+    # the VST backend selector.
+    #
+    # Note: daw is created here even if init might fail. It stays not-ready
+    # (is_ready False) if dawdreamer/Kontakt is missing or throws; the GUI
+    # treats not-ready as "VST offline" the same as if daw were None.
+    import threading
     from core.dawdreamer_engine import DawDreamerEngine
     daw = DawDreamerEngine()
-    try:
-        if daw.initialize():
-            print(f"DawDreamer ready — loaded presets: {daw.list_plugins()}")
-        else:
-            print("DawDreamer initialization returned False — VST backend disabled.")
-            daw = None
-    except Exception as e:
-        print(f"DawDreamer failed to initialize ({e}) — VST backend disabled.")
-        daw = None
+
+    def _init_daw_worker():
+        try:
+            if daw.initialize():
+                print(f"DawDreamer ready — loaded presets: {daw.list_plugins()}")
+            else:
+                print("DawDreamer initialization returned False — VST backend disabled.")
+        except Exception as e:
+            print(f"DawDreamer failed to initialize ({e}) — VST backend disabled.")
+
+    daw_thread = threading.Thread(
+        target=_init_daw_worker,
+        name="dawdreamer-init",
+        daemon=True,
+    )
+    daw_thread.start()
 
     # Launch main window
     from gui.main_window import MainWindow
@@ -78,10 +92,14 @@ def main():
 
     exit_code = app.exec()
 
-    # Cleanup
+    # Cleanup — wait briefly for the init thread if the user closed
+    # the window before Kontakt finished loading. If it's still going
+    # we let it die with the process (daemon=True).
     audio.shutdown()
-    if daw is not None:
-        daw.shutdown()
+    if daw_thread.is_alive():
+        print("Waiting up to 5s for DawDreamer init thread to finish...")
+        daw_thread.join(timeout=5.0)
+    daw.shutdown()
     sys.exit(exit_code)
 
 

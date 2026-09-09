@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (
     QMainWindow, QTabWidget, QWidget, QVBoxLayout, QLabel, QStatusBar,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from core.audio_engine import AudioEngine
 from core.dawdreamer_engine import DawDreamerEngine
@@ -11,6 +11,13 @@ from gui.saved_progressions import SavedProgressionsTab
 
 class MainWindow(QMainWindow):
     """Top-level application window."""
+
+    # Emitted (from any thread) when the DawDreamer engine's readiness
+    # changes. Connected to _refresh_status_bar via Qt's auto-queued
+    # connection, which marshals the call to the main thread — so slots
+    # can safely touch UI even when the signal was emitted from the
+    # DawDreamer init worker thread.
+    daw_ready_changed = Signal()
 
     def __init__(
         self,
@@ -30,6 +37,14 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
         self._apply_theme()
+
+        # Subscribe to DawDreamer readiness changes so the status bar can
+        # flip from "VST offline" to "Kontakt ready" when the background
+        # init thread finishes. The listener callback runs on the worker
+        # thread, so we bounce through a Qt signal to reach the UI thread.
+        if self.daw is not None:
+            self.daw_ready_changed.connect(self._refresh_status_bar)
+            self.daw.add_ready_listener(self.daw_ready_changed.emit)
 
     def _setup_ui(self):
         """Build the main UI layout with tabs."""
@@ -89,15 +104,28 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self.tabs)
 
-        # Status bar — shows both backends' readiness
+        # Status bar — shows both backends' readiness. Initial message
+        # set here; _refresh_status_bar() rebuilds it when DawDreamer
+        # readiness changes (via daw_ready_changed signal).
         self.status = QStatusBar()
         self.setStatusBar(self.status)
+        self._refresh_status_bar()
+        
+    def _refresh_status_bar(self) -> None:
+        """Rebuild the status bar message from current engine states.
+        Called at startup and whenever DawDreamer readiness changes.
+        Distinguishes 'loading' (daw exists, not ready yet) from
+        'offline' (daw is None) so the user knows the app is working
+        on it, not that VST is permanently unavailable."""
         fs_status = "🔊 FluidSynth ready" if self.audio.is_ready else "🔇 No SoundFont"
-        vst_status = (
-            "🎹 Kontakt ready"
-            if (self.daw is not None and self.daw.is_ready)
-            else "🎹 VST offline"
-        )
+
+        if self.daw is None:
+            vst_status = "🎹 VST offline"
+        elif self.daw.is_ready:
+            vst_status = "🎹 Kontakt ready"
+        else:
+            vst_status = "🎹 Kontakt loading..."
+
         self.status.showMessage(f"{fs_status}  |  {vst_status}")
 
     def _placeholder(self, title: str, description: str) -> QWidget:

@@ -20,6 +20,7 @@ import os
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Any
 
 import numpy as np
@@ -31,23 +32,33 @@ HAS_SOUNDDEVICE: bool = importlib.util.find_spec("sounddevice") is not None
 
 
 @contextlib.contextmanager
-def _silence_native_stderr():
-    """Redirect OS-level stderr (fd 2) to devnull for the duration of the
-    context. Used to swallow noisy C++ output from Kontakt's VST during
-    load_state — Python's sys.stderr redirection doesn't reach fd 2, so we
-    have to dup2 at the OS level. Restores fd 2 on exit even on exception.
+def _silence_native_output():
+    """Redirect OS-level stdout (fd 1) AND stderr (fd 2) to devnull for the
+    duration of the context. Kontakt writes its noisy startup messages
+    (PresetSlotManager, cannot resolve resource, nil, [error] lines) to
+    fd 1, not fd 2, so we swap both. Python's sys.stdout/sys.stderr
+    redirection doesn't reach fd 1/2 — we have to dup2 at the OS level.
+    Restores both fds on exit even on exception.
+
+    Callers must NOT print() from Python inside the block — those go to
+    fd 1 too and will be swallowed. Do prints before or after.
     """
-    # Flush anything Python has buffered first so we don't lose it
+    # Flush anything Python has buffered so we don't lose it
+    sys.stdout.flush()
     sys.stderr.flush()
-    saved_fd = os.dup(2)
+    saved_out = os.dup(1)
+    saved_err = os.dup(2)
     devnull_fd = os.open(os.devnull, os.O_WRONLY)
     try:
+        os.dup2(devnull_fd, 1)
         os.dup2(devnull_fd, 2)
         yield
     finally:
-        os.dup2(saved_fd, 2)
+        os.dup2(saved_out, 1)
+        os.dup2(saved_err, 2)
         os.close(devnull_fd)
-        os.close(saved_fd)
+        os.close(saved_out)
+        os.close(saved_err)
 
 # Default audio settings
 SAMPLE_RATE = 44100
@@ -81,6 +92,10 @@ class DawDreamerEngine:
         self._stream: Any = None  # sounddevice OutputStream
         self._stop_event = threading.Event()
         self._playback_thread: Optional[threading.Thread] = None
+        # Listeners notified whenever is_ready transitions (e.g. GUI status
+        # bar). Called from whichever thread flips readiness — Qt listeners
+        # must marshal to the main thread themselves (use a queued signal).
+        self._ready_listeners: list = []
 
     def initialize(self, vst_paths: dict[str, str] | None = None) -> bool:
         """
@@ -89,13 +104,18 @@ class DawDreamerEngine:
         Args:
             vst_paths: dict mapping instrument names to VST3 file paths.
                        e.g. {"piano": "C:/Program Files/Common Files/VST3/MyPiano.vst3"}
+
+        Notifies any registered ready-listeners once readiness settles
+        (success OR failure — listeners get the final state either way).
         """
         if not HAS_DAWDREAMER:
             print("Warning: dawdreamer not installed. VST audio disabled.")
+            self._notify_ready_listeners()
             return False
 
         if not HAS_SOUNDDEVICE:
             print("Warning: sounddevice not installed. Audio streaming disabled.")
+            self._notify_ready_listeners()
             return False
 
         try:
@@ -111,13 +131,35 @@ class DawDreamerEngine:
                 for name, path in vst_paths.items():
                     self._load_plugin(name, path)
 
-            self._initialized = True
+            # Load presets BEFORE flipping _initialized. is_ready reads
+            # from _initialized, and callers may check is_ready to decide
+            # whether to route playback to VST. If we flip early, they get
+            # a "ready" engine with no plugins loaded yet.
             self.load_presets()
+            self._initialized = True
+            self._notify_ready_listeners()
             return True
 
         except Exception as e:
             print(f"DawDreamer initialization error: {e}")
+            self._notify_ready_listeners()
             return False
+
+    def add_ready_listener(self, callback) -> None:
+        """Register a callback to fire when readiness changes. Called with
+        no arguments; the listener is expected to check is_ready itself.
+        Fires once at end of initialize() (success or failure)."""
+        self._ready_listeners.append(callback)
+
+    def _notify_ready_listeners(self) -> None:
+        """Call every registered ready-listener. Swallows per-listener
+        exceptions so one bad listener can't break the others or the
+        initialize() flow."""
+        for cb in self._ready_listeners:
+            try:
+                cb()
+            except Exception as e:
+                print(f"ready listener {cb!r} raised: {e}")
 
     @property
     def is_ready(self) -> bool:
@@ -142,34 +184,98 @@ class DawDreamerEngine:
             print(f"Error loading VST '{name}': {e}")
             return False
 
-    def load_presets(self, presets: dict[str, str] | None = None) -> None:
+    def load_presets(
+        self,
+        presets: dict[str, str] | None = None,
+        parallel: bool = False,
+        max_workers: int | None = None,
+    ) -> None:
         """Load Kontakt instances with saved state files.
 
         Args:
             presets: dict mapping role names to .bin state file paths.
-                Uses DEFAULT_PRESETS if not provided.
+                 Uses DEFAULT_PRESETS if not provided.
+            parallel: if True, load presets concurrently across a thread
+                pool. Defaults to False because Kontakt 8 hangs on
+                concurrent instantiation on Windows (tested 2026-08-26).
+                Parallel machinery is kept for future VST types that
+                tolerate it; do not enable for Kontakt.
+            max_workers: worker count for parallel mode. Default is min(len,
+                 os.cpu_count()) — one thread per preset, capped at CPU count
+                 to avoid disk contention on the sample library reads.
 
         Note: Kontakt writes cosmetic errors ("PresetSlotManager::selectSlot",
         "cannot resolve resource: resources_ENG", stray "nil" lines) directly
         to OS-level stderr (fd 2) during load_state(). These are harmless in
-        a headless render context (missing GUI resources don't affect audio).
-        We redirect fd 2 to devnull only around plugin.load_state() so any
-        errors from make_plugin_processor() or elsewhere still surface.
+        a headless render context. We redirect fd 2 only around
+        plugin.load_state() so errors from make_plugin_processor() still
+        surface. In parallel mode the silence still applies, but note that
+        it's process-wide during the parallel window — real stderr writes
+        from unrelated code (unlikely at startup) would also be suppressed.
         """
-        if not self.is_ready:
+        if self._engine is None:
             return
 
         preset_map = presets or DEFAULT_PRESETS
-        for name, state_path in preset_map.items():
-            _RenderEngine = getattr(__import__("dawdreamer"), "RenderEngine")
-            plugin = self._engine.make_plugin_processor(name, KONTAKT_VST3)
-            if plugin is None:
-                print(f"Failed to create Kontakt instance for '{name}'")
-                continue
-            with _silence_native_stderr():
-                plugin.load_state(state_path)
-            self._plugins[name] = plugin
-            print(f"Loaded preset: {name}")
+
+        if not parallel:
+            # Sequential path — original behavior, kept as fallback.
+            for name, state_path in preset_map.items():
+                self._load_single_preset(name, state_path)
+            return
+
+        # Parallel path — load presets concurrently.
+        # We wrap the entire parallel section in the stderr silencer
+        # because fd 2 is process-wide; toggling it inside each worker
+        # would race between threads.
+        worker_count = max_workers or min(len(preset_map), os.cpu_count() or 4)
+        with _silence_native_output():
+            with ThreadPoolExecutor(max_workers=worker_count) as pool:
+                # Submit all preset loads; each returns (name, plugin_or_None)
+                futures = {
+                    pool.submit(self._load_preset_worker, name, state_path): name
+                    for name, state_path in preset_map.items()
+                }
+                for future in as_completed(futures):
+                    name = futures[future]
+                    try:
+                        result_name, plugin = future.result()
+                        if plugin is not None:
+                            self._plugins[result_name] = plugin
+                            # print outside silence block via stderr won't
+                            # reach the terminal, so route to real stdout
+                            # which is untouched by _silence_native_stderr
+                            print(f"Loaded preset: {result_name}", flush=True)
+                        else:
+                            print(f"Failed to load preset: {name}", flush=True)
+                    except Exception as e:
+                        print(f"Preset '{name}' raised: {type(e).__name__}: {e}",
+                              flush=True)
+
+    def _load_single_preset(self, name: str, state_path: str) -> None:
+        """Sequential-path helper: create + load-state + register, with the
+        stderr silence wrapped around just load_state (fine when serial)."""
+        plugin = self._engine.make_plugin_processor(name, KONTAKT_VST3)
+        if plugin is None:
+            print(f"Failed to create Kontakt instance for '{name}'")
+            return
+        with _silence_native_output():
+            plugin.load_state(state_path)
+        self._plugins[name] = plugin
+        print(f"Loaded preset: {name}")
+
+    def _load_preset_worker(
+        self, name: str, state_path: str
+    ) -> tuple[str, Any]:
+        """Parallel-path worker: create + load-state and return the plugin
+        (or None on failure). Registration into self._plugins happens back
+        on the main thread in load_presets() to avoid dict-mutation races.
+        stderr silencing is applied by the caller, wrapping all workers."""
+        plugin = self._engine.make_plugin_processor(name, KONTAKT_VST3)
+        if plugin is None:
+            return (name, None)
+        plugin.load_state(state_path)
+        return (name, plugin)
     
     def list_plugins(self) -> list[str]:
         """Return names of all loaded plugins."""
